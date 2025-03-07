@@ -1,0 +1,20 @@
+{
+  "name": "hangout-voice-game",
+  "version": "1.0.0",
+  "description": "A web-based social game with proximity voice chat",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "nodemon server/index.js",
+    "easy-start": "node start.js",
+    "simple-start": "node start-simple.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.7.2",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+} 

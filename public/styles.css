@@ -1,0 +1,614 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Arial', sans-serif;
+  overflow: hidden;
+  background-color: #f0f0f0;
+}
+
+#game-container {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+}
+
+#game-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background-color: #ffffff;
+}
+
+/* Overlay Styles */
+.overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.7);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 10;
+}
+
+.login-container {
+  background-color: white;
+  padding: 2rem;
+  border-radius: 10px;
+  width: 90%;
+  max-width: 500px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.login-container h1 {
+  text-align: center;
+  margin-bottom: 1.5rem;
+  color: #333;
+}
+
+.form-group {
+  margin-bottom: 1rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: bold;
+  color: #555;
+}
+
+.form-group input {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+#image-preview {
+  margin-top: 0.5rem;
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  background-color: #eee;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+}
+
+#image-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+#start-button {
+  display: block;
+  width: 100%;
+  padding: 0.75rem;
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 1rem;
+  cursor: pointer;
+  margin-top: 1rem;
+  transition: background-color 0.3s;
+}
+
+#start-button:hover {
+  background-color: #45a049;
+}
+
+/* Game UI Styles */
+#game-ui {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 15px;
+  pointer-events: none;
+}
+
+#game-ui > div {
+  pointer-events: auto;
+  margin-bottom: 10px;
+}
+
+#player-count {
+  background-color: rgba(0, 0, 0, 0.5);
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  margin-bottom: 5px;
+}
+
+#controls-info {
+  background-color: rgba(0, 0, 0, 0.5);
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  text-align: center;
+  margin-bottom: 5px;
+}
+
+#mic-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background-color: rgba(0, 0, 0, 0.3);
+  padding: 5px 10px;
+  border-radius: 20px;
+  margin-bottom: 5px;
+}
+
+#mic-toggle {
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  cursor: pointer;
+}
+
+#mic-toggle.disabled {
+  background-color: #f44336;
+}
+
+#mic-indicator {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background-color: #ccc;
+}
+
+#mic-indicator.active {
+  background-color: #f44336;
+  animation: pulse 1s infinite;
+}
+
+/* Privacy Controls */
+#privacy-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background-color: rgba(0, 0, 0, 0.3);
+  padding: 5px 10px;
+  border-radius: 20px;
+  margin-bottom: 5px;
+}
+
+#toggle-user-info {
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  cursor: pointer;
+}
+
+#toggle-user-info.active {
+  background-color: #f44336;
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Player Menu Styles */
+#player-menu {
+  position: absolute;
+  background-color: white;
+  padding: 1rem;
+  border-radius: 10px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  z-index: 15;
+}
+
+#menu-player-name {
+  font-weight: bold;
+  margin-bottom: 0.5rem;
+  text-align: center;
+}
+
+#player-menu button {
+  display: block;
+  width: 100%;
+  padding: 0.5rem;
+  margin-bottom: 0.5rem;
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+#player-menu button:hover {
+  background-color: #45a049;
+}
+
+#mute-player.muted {
+  background-color: #f44336;
+}
+
+#close-menu {
+  background-color: #ccc !important;
+}
+
+#close-menu:hover {
+  background-color: #bbb !important;
+}
+
+/* Friends List Styles */
+#friends-list {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  background-color: white;
+  padding: 1rem;
+  border-radius: 10px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  z-index: 15;
+  max-width: 300px;
+}
+
+#friends-list h3 {
+  margin-top: 0;
+  text-align: center;
+}
+
+#friends {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+#friends li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #eee;
+}
+
+#friends li:last-child {
+  border-bottom: none;
+}
+
+#friends li button {
+  background-color: #f44336;
+  color: white;
+  border: none;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+#friends-list button {
+  display: block;
+  width: 100%;
+  padding: 0.5rem;
+  margin-top: 1rem;
+  background-color: #ccc;
+  color: #333;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+/* Friend button styles */
+#add-friend.friend-added {
+  background-color: #f44336;
+}
+
+/* Toast Notification */
+#toast-notification {
+  visibility: hidden;
+  min-width: 250px;
+  background-color: #333;
+  color: #fff;
+  text-align: center;
+  border-radius: 10px;
+  padding: 16px;
+  position: fixed;
+  z-index: 20;
+  left: 50%;
+  bottom: 30px;
+  transform: translateX(-50%);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  opacity: 0;
+  transition: opacity 0.3s, visibility 0.3s;
+}
+
+#toast-notification.show {
+  visibility: visible;
+  opacity: 1;
+  animation: fadein 0.5s, fadeout 0.5s 2.5s;
+}
+
+@keyframes fadein {
+  from {
+    bottom: 0;
+    opacity: 0;
+  }
+  to {
+    bottom: 30px;
+    opacity: 1;
+  }
+}
+
+@keyframes fadeout {
+  from {
+    bottom: 30px;
+    opacity: 1;
+  }
+  to {
+    bottom: 0;
+    opacity: 0;
+  }
+}
+
+/* Mini-map styles */
+#mini-map-container {
+  position: absolute;
+  top: 120px;
+  right: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+  z-index: 10;
+}
+
+#toggle-map {
+  background-color: rgba(0, 0, 0, 0.5);
+  color: white;
+  border: none;
+  padding: 5px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+#toggle-map:hover {
+  background-color: rgba(0, 0, 0, 0.7);
+}
+
+.mini-map {
+  width: 200px;
+  height: 200px;
+  background-color: rgba(0, 0, 0, 0.3);
+  border-radius: 10px;
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
+  overflow: hidden;
+  border: 2px solid rgba(255, 255, 255, 0.5);
+}
+
+#mini-map-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+/* Mini-map title */
+.mini-map::before {
+  content: "MAP";
+  position: absolute;
+  top: 5px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  font-weight: bold;
+  color: white;
+  text-shadow: 0 0 3px rgba(0, 0, 0, 0.8);
+  z-index: 1;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* Game Tools */
+#game-tools {
+  position: absolute;
+  bottom: 170px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 10px;
+  z-index: 10;
+}
+
+#game-tools button {
+  background-color: rgba(0, 0, 0, 0.7);
+  color: white;
+  border: none;
+  padding: 10px 15px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.3s;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+}
+
+#game-tools button:hover {
+  background-color: rgba(0, 0, 0, 0.9);
+}
+
+/* Whiteboard Styles */
+#whiteboard-container {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 80%;
+  height: 80%;
+  background-color: white;
+  border-radius: 10px;
+  box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  z-index: 20;
+}
+
+.whiteboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 15px;
+  background-color: #f0f0f0;
+  border-top-left-radius: 10px;
+  border-top-right-radius: 10px;
+  border-bottom: 1px solid #ddd;
+}
+
+.whiteboard-header h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.whiteboard-tools {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.tool-btn {
+  background-color: #eee;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 5px 10px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.tool-btn.active {
+  background-color: #4CAF50;
+  color: white;
+  border-color: #4CAF50;
+}
+
+#pen-color {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+#pen-size {
+  padding: 5px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+#clear-whiteboard {
+  background-color: #f44336;
+  color: white;
+  border: none;
+  padding: 5px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+#close-whiteboard {
+  background-color: #ccc;
+  border: none;
+  padding: 5px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+#whiteboard-canvas {
+  flex: 1;
+  background-color: white;
+  border-bottom-left-radius: 10px;
+  border-bottom-right-radius: 10px;
+  cursor: crosshair;
+}
+
+/* Emote Menu Styles */
+#emote-menu {
+  position: absolute;
+  bottom: 230px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: rgba(255, 255, 255, 0.9);
+  border-radius: 10px;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+  padding: 10px;
+  z-index: 15;
+}
+
+.emote-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 5px;
+}
+
+.emote-btn {
+  width: 40px;
+  height: 40px;
+  font-size: 24px;
+  background-color: transparent;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: transform 0.2s, background-color 0.2s;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.emote-btn:hover {
+  background-color: #f0f0f0;
+  transform: scale(1.1);
+}
+
+/* Emote Animation */
+.player-emote {
+  position: absolute;
+  font-size: 24px;
+  animation: emote-float 2s ease-out forwards;
+  pointer-events: none;
+}
+
+@keyframes emote-float {
+  0% {
+    transform: translateY(0) scale(0.5);
+    opacity: 0;
+  }
+  20% {
+    transform: translateY(-20px) scale(1.2);
+    opacity: 1;
+  }
+  80% {
+    transform: translateY(-40px) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-50px) scale(0.8);
+    opacity: 0;
+  }
+} 

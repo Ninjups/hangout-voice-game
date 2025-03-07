@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hangout Voice Game</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="game-container">
+    <canvas id="game-canvas"></canvas>
+    
+    <!-- Login Screen -->
+    <div id="login-screen" class="overlay">
+      <div class="login-container">
+        <h1>Hangout Voice Game</h1>
+        <div class="form-group">
+          <label for="player-name">Your Name:</label>
+          <input type="text" id="player-name" placeholder="Enter your name">
+        </div>
+        <div class="form-group">
+          <label for="player-color">Choose Color:</label>
+          <input type="color" id="player-color">
+        </div>
+        <div class="form-group">
+          <label for="player-image">Upload Profile Image (optional):</label>
+          <input type="file" id="player-image" accept="image/*">
+          <div id="image-preview"></div>
+        </div>
+        <button id="start-button">Start Game</button>
+      </div>
+    </div>
+    
+    <!-- Game UI -->
+    <div id="game-ui">
+      <div id="player-count">Players: 0</div>
+      <div id="controls-info">
+        <p>WASD or Arrow Keys to move</p>
+        <p>Click on players to interact</p>
+      </div>
+      <div id="mic-status">
+        <button id="mic-toggle">Enable Microphone</button>
+        <div id="mic-indicator"></div>
+      </div>
+      
+      <!-- Privacy Controls -->
+      <div id="privacy-controls">
+        <button id="toggle-user-info">Hide User Info</button>
+      </div>
+      
+      <!-- Mini-map -->
+      <div id="mini-map-container">
+        <button id="toggle-map">Hide Map</button>
+        <div id="mini-map" class="mini-map">
+          <canvas id="mini-map-canvas"></canvas>
+        </div>
+      </div>
+      
+      <!-- Game Tools -->
+      <div id="game-tools">
+        <button id="open-whiteboard">Whiteboard</button>
+        <button id="open-emotes">Emotes</button>
+      </div>
+    </div>
+    
+    <!-- Player Interaction Menu -->
+    <div id="player-menu" class="hidden">
+      <div id="menu-player-name"></div>
+      <button id="mute-player">Mute Player</button>
+      <button id="add-friend">Add as Friend</button>
+      <button id="close-menu">Close</button>
+    </div>
+    
+    <!-- Friends List -->
+    <div id="friends-list" class="hidden">
+      <h3>Friends</h3>
+      <ul id="friends"></ul>
+      <button id="close-friends">Close</button>
+    </div>
+    
+    <!-- Whiteboard -->
+    <div id="whiteboard-container" class="hidden">
+      <div class="whiteboard-header">
+        <h3>Collaborative Whiteboard</h3>
+        <div class="whiteboard-tools">
+          <button id="pen-tool" class="tool-btn active" data-tool="pen">Pen</button>
+          <button id="eraser-tool" class="tool-btn" data-tool="eraser">Eraser</button>
+          <input type="color" id="pen-color" value="#000000">
+          <select id="pen-size">
+            <option value="2">Small</option>
+            <option value="5" selected>Medium</option>
+            <option value="10">Large</option>
+          </select>
+          <button id="clear-whiteboard">Clear</button>
+        </div>
+        <button id="close-whiteboard">Close</button>
+      </div>
+      <canvas id="whiteboard-canvas"></canvas>
+    </div>
+    
+    <!-- Emote Menu -->
+    <div id="emote-menu" class="hidden">
+      <div class="emote-grid">
+        <button class="emote-btn" data-emote="thumbsup">👍</button>
+        <button class="emote-btn" data-emote="heart">❤️</button>
+        <button class="emote-btn" data-emote="laugh">😂</button>
+        <button class="emote-btn" data-emote="wave">👋</button>
+        <button class="emote-btn" data-emote="think">🤔</button>
+        <button class="emote-btn" data-emote="clap">👏</button>
+        <button class="emote-btn" data-emote="sad">😢</button>
+        <button class="emote-btn" data-emote="angry">😠</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Scripts -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
+  <script src="/js/game.js" type="module"></script>
+</body>
+</html> 
