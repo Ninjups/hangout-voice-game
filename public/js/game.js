@@ -1,10 +1,14 @@
 // Game constants
 const PLAYER_RADIUS = 30;
 const MOVEMENT_SPEED = 5;
+const ACCELERATION = 0.5; // New acceleration constant
+const FRICTION = 0.9; // New friction constant (0-1, where 1 is no friction)
+const MAX_VELOCITY = 8; // Maximum velocity cap
 const VOICE_MAX_DISTANCE = 250; // Reduced to half the original distance (was 500)
 const VOICE_MIN_VOLUME = 0; // Minimum volume set to 0 for complete silence at max distance
 const MINIMAP_SIZE = 200; // Size of the mini-map in pixels
 const MINIMAP_PADDING = 20; // Padding from the edge of the screen
+const JOYSTICK_MAX_DISTANCE = 40; // Maximum distance the joystick thumb can move
 
 // Game state
 let canvas, ctx;
@@ -50,8 +54,19 @@ let isSpeaking = false;
 // Bot variables
 let botSounds = {};
 
+// Global variables
+let socket;
+let audioContext;
+let analyzer;
+let isMobileDevice = false;
+let joystickActive = false;
+let joystickPosition = { x: 0, y: 0 };
+
 // Initialize the game
 function init() {
+  // Detect touch devices
+  detectTouchDevice();
+  
   // Set up canvas
   canvas = document.getElementById('game-canvas');
   ctx = canvas.getContext('2d');
@@ -83,6 +98,11 @@ function init() {
   
   // Set up emotes
   setupEmotes();
+  
+  // Set up mobile controls if on a touch device
+  if (isMobileDevice) {
+    setupMobileControls();
+  }
 
   // Connect to server
   connectToServer();
@@ -157,6 +177,17 @@ function setupInputHandlers() {
   
   // Toggle user info (hide/show names and images)
   document.getElementById('toggle-user-info').addEventListener('click', toggleUserInfo);
+  
+  // Whiteboard and emotes
+  document.getElementById('open-whiteboard').addEventListener('click', () => {
+    document.getElementById('whiteboard-container').classList.remove('hidden');
+  });
+  
+  document.getElementById('open-emotes').addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation(); // Stop event propagation
+    document.getElementById('emote-menu').classList.toggle('hidden');
+  });
 }
 
 // Set up login screen
@@ -231,7 +262,7 @@ function setupLoginScreen() {
 // Connect to server
 function connectToServer() {
   // Connect to Socket.IO server
-  window.socket = io();
+  socket = io();
 
   // Handle connection events
   socket.on('connect', () => {
@@ -243,6 +274,14 @@ function connectToServer() {
     playerId = data.id;
     players = data.players;
     worldSize = data.worldSize;
+
+    // Initialize velocity for all players if not present
+    for (const id in players) {
+      if (players[id].velocityX === undefined) {
+        players[id].velocityX = 0;
+        players[id].velocityY = 0;
+      }
+    }
 
     // Center camera on player
     if (players[playerId]) {
@@ -263,6 +302,13 @@ function connectToServer() {
   socket.on('playerJoined', (player) => {
     console.log(`Player joined: ${player.id}`);
     players[player.id] = player;
+    
+    // Initialize velocity if not present
+    if (players[player.id].velocityX === undefined) {
+      players[player.id].velocityX = 0;
+      players[player.id].velocityY = 0;
+    }
+    
     updatePlayerCount();
     
     // Set up WebRTC connection for the new player if not a bot
@@ -297,6 +343,10 @@ function connectToServer() {
     if (players[data.id]) {
       players[data.id].x = data.x;
       players[data.id].y = data.y;
+      
+      // Update velocity information if provided
+      if (data.velocityX !== undefined) players[data.id].velocityX = data.velocityX;
+      if (data.velocityY !== undefined) players[data.id].velocityY = data.velocityY;
       
       // Update audio volume based on distance
       if (players[data.id].isBot) {
@@ -953,6 +1003,23 @@ function drawPlayer(player) {
   }
   
   ctx.restore();
+
+  // Draw movement direction indicator if player has velocity
+  if (player.velocityX !== undefined && player.velocityY !== undefined) {
+    const velocityMagnitude = Math.sqrt(player.velocityX * player.velocityX + player.velocityY * player.velocityY);
+    if (velocityMagnitude > 0.5) {
+      const directionX = player.velocityX / velocityMagnitude;
+      const directionY = player.velocityY / velocityMagnitude;
+      const indicatorLength = PLAYER_RADIUS * (0.5 + velocityMagnitude / 8); // Scale with velocity
+      
+      ctx.beginPath();
+      ctx.moveTo(screenX, screenY);
+      ctx.lineTo(screenX + directionX * indicatorLength, screenY + directionY * indicatorLength);
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+    }
+  }
 
   // Draw speaking indicator
   if (player.isSpeaking && !mutedPlayers.includes(player.id)) {
@@ -1650,11 +1717,6 @@ function setupEmotes() {
   const openEmotesBtn = document.getElementById('open-emotes');
   const emoteButtons = document.querySelectorAll('.emote-btn');
   
-  // Toggle emote menu
-  openEmotesBtn.addEventListener('click', () => {
-    emoteMenu.classList.toggle('hidden');
-  });
-  
   // Hide emote menu when clicking outside
   document.addEventListener('click', (e) => {
     if (!emoteMenu.contains(e.target) && e.target !== openEmotesBtn) {
@@ -1664,7 +1726,10 @@ function setupEmotes() {
   
   // Handle emote selection
   emoteButtons.forEach(button => {
-    button.addEventListener('click', () => {
+    button.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation(); // Stop event propagation
+      
       const emote = button.getAttribute('data-emote');
       const emoteSymbol = button.textContent;
       
@@ -1690,19 +1755,6 @@ function startDrawing(e) {
   const rect = whiteboardCanvas.getBoundingClientRect();
   lastX = e.clientX - rect.left;
   lastY = e.clientY - rect.top;
-}
-
-// Handle touch start for whiteboard
-function handleTouchStart(e) {
-  e.preventDefault();
-  if (e.touches.length === 1) {
-    const touch = e.touches[0];
-    const mouseEvent = new MouseEvent('mousedown', {
-      clientX: touch.clientX,
-      clientY: touch.clientY
-    });
-    whiteboardCanvas.dispatchEvent(mouseEvent);
-  }
 }
 
 // Draw on whiteboard
@@ -1750,29 +1802,108 @@ function draw(e) {
   lastY = y;
 }
 
-// Handle touch move for whiteboard
-function handleTouchMove(e) {
-  e.preventDefault();
-  if (e.touches.length === 1) {
-    const touch = e.touches[0];
-    const mouseEvent = new MouseEvent('mousemove', {
-      clientX: touch.clientX,
-      clientY: touch.clientY
-    });
-    whiteboardCanvas.dispatchEvent(mouseEvent);
-  }
-}
-
 // Stop drawing on whiteboard
 function stopDrawing() {
   isDrawing = false;
 }
 
+// Handle touch start for whiteboard
+function handleTouchStart(e) {
+  e.preventDefault();
+  if (e.touches.length === 1) {
+    isDrawing = true;
+    const touch = e.touches[0];
+    const rect = whiteboardCanvas.getBoundingClientRect();
+    lastX = touch.clientX - rect.left;
+    lastY = touch.clientY - rect.top;
+    
+    // Create initial dot at touch point
+    whiteboardCtx.lineJoin = 'round';
+    whiteboardCtx.lineCap = 'round';
+    
+    if (currentTool === 'pen') {
+      whiteboardCtx.strokeStyle = penColor;
+      whiteboardCtx.lineWidth = penSize;
+      whiteboardCtx.globalCompositeOperation = 'source-over';
+    } else if (currentTool === 'eraser') {
+      whiteboardCtx.strokeStyle = '#ffffff';
+      whiteboardCtx.lineWidth = penSize * 2;
+      whiteboardCtx.globalCompositeOperation = 'destination-out';
+    }
+    
+    whiteboardCtx.beginPath();
+    whiteboardCtx.arc(lastX, lastY, whiteboardCtx.lineWidth / 2, 0, Math.PI * 2);
+    whiteboardCtx.fill();
+    
+    // Store drawing data for the initial dot
+    const drawData = {
+      tool: currentTool,
+      color: penColor,
+      size: penSize,
+      dot: { x: lastX, y: lastY }
+    };
+    
+    // Add to local data
+    whiteboardData.push(drawData);
+    
+    // Send to server
+    socket.emit('whiteboard-draw', drawData);
+  }
+}
+
+// Handle touch move for whiteboard
+function handleTouchMove(e) {
+  e.preventDefault();
+  if (!isDrawing) return;
+  
+  if (e.touches.length === 1) {
+    const touch = e.touches[0];
+    const rect = whiteboardCanvas.getBoundingClientRect();
+    const x = touch.clientX - rect.left;
+    const y = touch.clientY - rect.top;
+    
+    whiteboardCtx.lineJoin = 'round';
+    whiteboardCtx.lineCap = 'round';
+    
+    if (currentTool === 'pen') {
+      whiteboardCtx.strokeStyle = penColor;
+      whiteboardCtx.lineWidth = penSize;
+      whiteboardCtx.globalCompositeOperation = 'source-over';
+    } else if (currentTool === 'eraser') {
+      whiteboardCtx.strokeStyle = '#ffffff';
+      whiteboardCtx.lineWidth = penSize * 2;
+      whiteboardCtx.globalCompositeOperation = 'destination-out';
+    }
+    
+    whiteboardCtx.beginPath();
+    whiteboardCtx.moveTo(lastX, lastY);
+    whiteboardCtx.lineTo(x, y);
+    whiteboardCtx.stroke();
+    
+    // Store drawing data
+    const drawData = {
+      tool: currentTool,
+      color: penColor,
+      size: penSize,
+      from: { x: lastX, y: lastY },
+      to: { x, y }
+    };
+    
+    // Add to local data
+    whiteboardData.push(drawData);
+    
+    // Send to server
+    socket.emit('whiteboard-draw', drawData);
+    
+    lastX = x;
+    lastY = y;
+  }
+}
+
 // Handle touch end for whiteboard
 function handleTouchEnd(e) {
   e.preventDefault();
-  const mouseEvent = new MouseEvent('mouseup');
-  whiteboardCanvas.dispatchEvent(mouseEvent);
+  isDrawing = false;
 }
 
 // Redraw whiteboard from stored data
@@ -1850,6 +1981,12 @@ function handlePlayerMovement() {
     const prevX = player.x;
     const prevY = player.y;
     
+    // Initialize velocity if not present
+    if (player.velocityX === undefined) {
+      player.velocityX = 0;
+      player.velocityY = 0;
+    }
+    
     // Check if we have a target position from mini-map click
     if (player.targetX !== undefined && player.targetY !== undefined) {
       // Calculate direction to target
@@ -1862,60 +1999,95 @@ function handlePlayerMovement() {
         player.targetX = undefined;
         player.targetY = undefined;
       } else {
-        // Move towards target
+        // Move towards target with acceleration
         const normalizedDirX = dirX / distance;
         const normalizedDirY = dirY / distance;
         
-        player.x += normalizedDirX * MOVEMENT_SPEED;
-        player.y += normalizedDirY * MOVEMENT_SPEED;
+        player.velocityX += normalizedDirX * ACCELERATION;
+        player.velocityY += normalizedDirY * ACCELERATION;
         moved = true;
       }
     } else {
-      // WASD or Arrow keys
+      // Handle keyboard input
       if (keys['w'] || keys['arrowup']) {
-        player.y -= MOVEMENT_SPEED;
+        player.velocityY -= ACCELERATION;
         moved = true;
         // Clear any target when using manual movement
         player.targetX = undefined;
         player.targetY = undefined;
       }
       if (keys['s'] || keys['arrowdown']) {
-        player.y += MOVEMENT_SPEED;
+        player.velocityY += ACCELERATION;
         moved = true;
         // Clear any target when using manual movement
         player.targetX = undefined;
         player.targetY = undefined;
       }
       if (keys['a'] || keys['arrowleft']) {
-        player.x -= MOVEMENT_SPEED;
+        player.velocityX -= ACCELERATION;
         moved = true;
         // Clear any target when using manual movement
         player.targetX = undefined;
         player.targetY = undefined;
       }
       if (keys['d'] || keys['arrowright']) {
-        player.x += MOVEMENT_SPEED;
+        player.velocityX += ACCELERATION;
+        moved = true;
+        // Clear any target when using manual movement
+        player.targetX = undefined;
+        player.targetY = undefined;
+      }
+      
+      // Handle joystick input for mobile
+      if (joystickActive && (Math.abs(joystickPosition.x) > 0.1 || Math.abs(joystickPosition.y) > 0.1)) {
+        player.velocityX += joystickPosition.x * ACCELERATION * 2; // Slightly stronger for mobile
+        player.velocityY += joystickPosition.y * ACCELERATION * 2;
         moved = true;
         // Clear any target when using manual movement
         player.targetX = undefined;
         player.targetY = undefined;
       }
     }
-
-    // Keep player within world bounds
+    
+    // Apply velocity cap
+    player.velocityX = Math.max(-MAX_VELOCITY, Math.min(MAX_VELOCITY, player.velocityX));
+    player.velocityY = Math.max(-MAX_VELOCITY, Math.min(MAX_VELOCITY, player.velocityY));
+    
+    // Apply velocity to position
+    player.x += player.velocityX;
+    player.y += player.velocityY;
+    
+    // Apply friction
+    player.velocityX *= FRICTION;
+    player.velocityY *= FRICTION;
+    
+    // Stop completely if velocity is very small
+    if (Math.abs(player.velocityX) < 0.01) player.velocityX = 0;
+    if (Math.abs(player.velocityY) < 0.01) player.velocityY = 0;
+    
+    // Keep player within world bounds and handle collisions
+    const prevBoundX = player.x;
+    const prevBoundY = player.y;
+    
     player.x = Math.max(PLAYER_RADIUS, Math.min(worldSize.width - PLAYER_RADIUS, player.x));
     player.y = Math.max(PLAYER_RADIUS, Math.min(worldSize.height - PLAYER_RADIUS, player.y));
+    
+    // If player hit a boundary, zero out the velocity in that direction
+    if (player.x !== prevBoundX) player.velocityX = 0;
+    if (player.y !== prevBoundY) player.velocityY = 0;
     
     // Update camera position
     camera.x = player.x - canvas.width / 2;
     camera.y = player.y - canvas.height / 2;
-
+    
     // Emit movement to server if player moved
-    if (moved && (prevX !== player.x || prevY !== player.y)) {
+    if (moved || Math.abs(player.velocityX) > 0.01 || Math.abs(player.velocityY) > 0.01) {
       socket.emit('move', {
         id: playerId,
         x: player.x,
-        y: player.y
+        y: player.y,
+        velocityX: player.velocityX,
+        velocityY: player.velocityY
       });
       
       // Update audio volumes for all players
@@ -1930,4 +2102,144 @@ function handlePlayerMovement() {
       }
     }
   }
+}
+
+// Detect if the device supports touch
+function detectTouchDevice() {
+  isMobileDevice = ('ontouchstart' in window) || 
+                   (navigator.maxTouchPoints > 0) || 
+                   (navigator.msMaxTouchPoints > 0);
+  
+  if (isMobileDevice) {
+    document.body.classList.add('touch-device');
+    document.getElementById('mobile-controls').classList.remove('hidden');
+  }
+}
+
+// Set up mobile controls
+function setupMobileControls() {
+  const joystickBase = document.getElementById('joystick-base');
+  const joystickThumb = document.getElementById('joystick-thumb');
+  
+  // Joystick touch events
+  joystickBase.addEventListener('touchstart', handleJoystickStart);
+  joystickBase.addEventListener('touchmove', handleJoystickMove);
+  joystickBase.addEventListener('touchend', handleJoystickEnd);
+  
+  // Mobile action buttons
+  document.getElementById('mobile-emote-btn').addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    document.getElementById('emote-menu').classList.remove('hidden');
+  });
+  
+  document.getElementById('mobile-interact-btn').addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    handleMobileInteract();
+  });
+  
+  document.getElementById('mobile-menu-btn').addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    toggleMobileMenu();
+  });
+}
+
+// Handle joystick touch start
+function handleJoystickStart(e) {
+  e.preventDefault();
+  joystickActive = true;
+  updateJoystickPosition(e.touches[0]);
+}
+
+// Handle joystick touch move
+function handleJoystickMove(e) {
+  e.preventDefault();
+  if (joystickActive) {
+    updateJoystickPosition(e.touches[0]);
+  }
+}
+
+// Handle joystick touch end
+function handleJoystickEnd(e) {
+  e.preventDefault();
+  joystickActive = false;
+  resetJoystick();
+}
+
+// Update joystick position based on touch
+function updateJoystickPosition(touch) {
+  const joystickBase = document.getElementById('joystick-base');
+  const joystickThumb = document.getElementById('joystick-thumb');
+  
+  // Get joystick base position and dimensions
+  const baseRect = joystickBase.getBoundingClientRect();
+  const centerX = baseRect.width / 2;
+  const centerY = baseRect.height / 2;
+  
+  // Calculate touch position relative to joystick base center
+  const touchX = touch.clientX - baseRect.left;
+  const touchY = touch.clientY - baseRect.top;
+  
+  // Calculate distance from center
+  const deltaX = touchX - centerX;
+  const deltaY = touchY - centerY;
+  const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+  
+  // Normalize and limit distance
+  if (distance > JOYSTICK_MAX_DISTANCE) {
+    const angle = Math.atan2(deltaY, deltaX);
+    const limitedX = Math.cos(angle) * JOYSTICK_MAX_DISTANCE;
+    const limitedY = Math.sin(angle) * JOYSTICK_MAX_DISTANCE;
+    
+    joystickThumb.style.transform = `translate(${limitedX}px, ${limitedY}px)`;
+    joystickPosition = {
+      x: limitedX / JOYSTICK_MAX_DISTANCE,
+      y: limitedY / JOYSTICK_MAX_DISTANCE
+    };
+  } else {
+    joystickThumb.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+    joystickPosition = {
+      x: deltaX / JOYSTICK_MAX_DISTANCE,
+      y: deltaY / JOYSTICK_MAX_DISTANCE
+    };
+  }
+}
+
+// Reset joystick to center position
+function resetJoystick() {
+  const joystickThumb = document.getElementById('joystick-thumb');
+  joystickThumb.style.transform = 'translate(0px, 0px)';
+  joystickPosition = { x: 0, y: 0 };
+}
+
+// Handle mobile interact button
+function handleMobileInteract() {
+  // Find the closest player to interact with
+  if (players[playerId]) {
+    let closestPlayer = null;
+    let closestDistance = Infinity;
+    
+    for (const id in players) {
+      if (id !== playerId) {
+        const dx = players[id].x - players[playerId].x;
+        const dy = players[id].y - players[playerId].y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        if (distance < closestDistance && distance < 100) {
+          closestDistance = distance;
+          closestPlayer = players[id];
+        }
+      }
+    }
+    
+    if (closestPlayer) {
+      selectedPlayer = closestPlayer;
+      showPlayerMenu(closestPlayer, window.innerWidth / 2, window.innerHeight / 2);
+    }
+  }
+}
+
+// Toggle mobile menu
+function toggleMobileMenu() {
+  const gameUI = document.getElementById('game-ui');
+  gameUI.classList.toggle('show-mobile-menu');
 } 

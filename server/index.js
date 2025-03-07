@@ -24,65 +24,63 @@ const worldSize = { width: 10000, height: 10000 };
 let botMovementInterval;
 let whiteboardData = []; // Store whiteboard drawing data
 
-// Create a bot player
-function createBot() {
-  const botId = 'bot-' + uuidv4();
-  const x = Math.floor(Math.random() * worldSize.width);
-  const y = Math.floor(Math.random() * worldSize.height);
-  
-  players[botId] = {
-    id: botId,
-    socketId: 'bot', // Special identifier for bots
-    x,
-    y,
-    color: '#FF5733', // Default color for bot
-    name: 'Dracula Bot',
-    isSpeaking: true, // Always start speaking
-    isBot: true,
-    customImage: '/assets/bots/GASOv75XUAAuLZq.jpg', // Path to the bot image
-    botSoundFile: '/assets/bots/DraculaFlowa.mp3', // Path to the bot sound file
-    lastSpeakingChange: Date.now(), // Track when the bot last changed speaking state
-    speakingDuration: 0, // Track how long the bot has been in the current speaking state
-    forceSpeakingChange: false, // Flag to force a speaking state change
-    audioStartTime: Date.now() // Timestamp when audio started playing
-  };
-  
-  console.log('Bot created with ID:', botId);
-  
-  // Start the bot speaking immediately
-  setTimeout(() => {
-    // Ensure the bot is speaking
-    players[botId].isSpeaking = true;
-    players[botId].lastSpeakingChange = Date.now();
-    players[botId].audioStartTime = Date.now();
-    
-    // Broadcast bot speaking status with timestamp
-    io.emit('playerSpeaking', {
-      id: botId,
-      isSpeaking: true,
-      timestamp: players[botId].audioStartTime
-    });
-    
-    console.log(`Bot ${botId} is speaking (initial)`);
-  }, 2000);
-  
-  return botId;
-}
+// Create a bot with a random ID
+const botId = `bot-${uuidv4()}`;
+players[botId] = {
+  id: botId,
+  socketId: null,
+  x: Math.random() * (worldSize.width - 60) + 30,
+  y: Math.random() * (worldSize.height - 60) + 30,
+  velocityX: 0, // Initialize velocity
+  velocityY: 0, // Initialize velocity
+  color: '#FF0000', // Red color for the bot
+  name: 'Dracula Bot',
+  isSpeaking: true, // Always start speaking
+  isBot: true,
+  customImage: '/assets/bots/GASOv75XUAAuLZq.jpg', // Path to the bot image
+  botSoundFile: '/assets/bots/DraculaFlowa.mp3', // Path to the bot sound file
+  lastSpeakingChange: Date.now(), // Track when the bot last changed speaking state
+  speakingDuration: 0, // Track how long the bot has been in the current speaking state
+  forceSpeakingChange: false, // Flag to force a speaking state change
+  audioStartTime: Date.now() // Timestamp when audio started playing
+};
 
 // Move bot randomly
 function moveBotRandomly(botId) {
   if (!players[botId]) return;
   
-  // Random movement
+  // Random movement with acceleration
   const moveX = Math.random() > 0.5 ? 1 : -1;
   const moveY = Math.random() > 0.5 ? 1 : -1;
   
-  players[botId].x += moveX * 5;
-  players[botId].y += moveY * 5;
+  // Apply acceleration with some randomness
+  players[botId].velocityX += moveX * 0.2 * Math.random();
+  players[botId].velocityY += moveY * 0.2 * Math.random();
+  
+  // Apply velocity cap
+  const MAX_BOT_VELOCITY = 4;
+  players[botId].velocityX = Math.max(-MAX_BOT_VELOCITY, Math.min(MAX_BOT_VELOCITY, players[botId].velocityX));
+  players[botId].velocityY = Math.max(-MAX_BOT_VELOCITY, Math.min(MAX_BOT_VELOCITY, players[botId].velocityY));
+  
+  // Apply velocity to position
+  players[botId].x += players[botId].velocityX;
+  players[botId].y += players[botId].velocityY;
+  
+  // Apply friction
+  const BOT_FRICTION = 0.95;
+  players[botId].velocityX *= BOT_FRICTION;
+  players[botId].velocityY *= BOT_FRICTION;
   
   // Keep bot within world bounds
+  const prevX = players[botId].x;
+  const prevY = players[botId].y;
+  
   players[botId].x = Math.max(30, Math.min(worldSize.width - 30, players[botId].x));
   players[botId].y = Math.max(30, Math.min(worldSize.height - 30, players[botId].y));
+  
+  // If bot hit a boundary, reverse velocity in that direction
+  if (players[botId].x !== prevX) players[botId].velocityX *= -0.5;
+  if (players[botId].y !== prevY) players[botId].velocityY *= -0.5;
   
   // Get current time
   const currentTime = Date.now();
@@ -126,7 +124,9 @@ function moveBotRandomly(botId) {
   io.emit('playerMoved', {
     id: botId,
     x: players[botId].x,
-    y: players[botId].y
+    y: players[botId].y,
+    velocityX: players[botId].velocityX,
+    velocityY: players[botId].velocityY
   });
 }
 
@@ -145,6 +145,8 @@ io.on('connection', (socket) => {
     socketId: socket.id,
     x,
     y,
+    velocityX: 0, // Initialize velocity
+    velocityY: 0, // Initialize velocity
     color: '#' + Math.floor(Math.random() * 16777215).toString(16), // Random color
     name: `Player ${Object.keys(players).length + 1}`,
     isSpeaking: false,
@@ -170,11 +172,17 @@ io.on('connection', (socket) => {
       players[data.id].x = data.x;
       players[data.id].y = data.y;
       
+      // Update velocity information
+      if (data.velocityX !== undefined) players[data.id].velocityX = data.velocityX;
+      if (data.velocityY !== undefined) players[data.id].velocityY = data.velocityY;
+      
       // Broadcast player movement to all other players
       socket.broadcast.emit('playerMoved', {
         id: data.id,
         x: data.x,
-        y: data.y
+        y: data.y,
+        velocityX: players[data.id].velocityX,
+        velocityY: players[data.id].velocityY
       });
     }
   });
@@ -330,16 +338,10 @@ function findPlayerIdBySocketId(socketId) {
   return null;
 }
 
-// Create a bot when the server starts
-let botId;
-
 // Start the server
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  
-  // Create a bot after server starts
-  botId = createBot();
   
   // Start bot movement
   botMovementInterval = setInterval(() => {

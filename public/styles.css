@@ -554,11 +554,12 @@ body {
   bottom: 230px;
   left: 50%;
   transform: translateX(-50%);
-  background-color: rgba(255, 255, 255, 0.9);
+  background-color: rgba(255, 255, 255, 0.95);
   border-radius: 10px;
   box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
   padding: 10px;
-  z-index: 15;
+  z-index: 1000;
+  pointer-events: auto;
 }
 
 .emote-grid {
@@ -611,4 +612,161 @@ body {
     transform: translateY(-50px) scale(0.8);
     opacity: 0;
   }
+}
+
+/* Mobile Controls */
+#mobile-controls {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 200px;
+  z-index: 5;
+  display: flex;
+  justify-content: space-between;
+  pointer-events: none; /* Allow clicks to pass through the container */
+}
+
+#joystick-container {
+  position: absolute;
+  bottom: 30px;
+  left: 30px;
+  width: 120px;
+  height: 120px;
+  pointer-events: auto; /* Enable pointer events for the joystick */
+}
+
+#joystick-base {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.2);
+  border-radius: 50%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  touch-action: none; /* Prevent default touch actions */
+}
+
+#joystick-thumb {
+  width: 50px;
+  height: 50px;
+  background-color: rgba(0, 0, 0, 0.5);
+  border-radius: 50%;
+  position: relative;
+  touch-action: none; /* Prevent default touch actions */
+}
+
+#mobile-action-buttons {
+  position: absolute;
+  bottom: 30px;
+  right: 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  pointer-events: auto; /* Enable pointer events for the buttons */
+}
+
+.mobile-btn {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background-color: rgba(255, 255, 255, 0.8);
+  border: 2px solid rgba(0, 0, 0, 0.2);
+  font-size: 24px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  touch-action: manipulation; /* Optimize for touch */
+  -webkit-tap-highlight-color: transparent; /* Remove tap highlight on iOS */
+}
+
+.mobile-btn:active {
+  background-color: rgba(200, 200, 200, 0.8);
+  transform: scale(0.95);
+}
+
+/* Media Queries for Mobile Devices */
+@media (max-width: 768px) {
+  #game-ui {
+    /* Adjust game UI for mobile */
+    font-size: 14px;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    background-color: rgba(0, 0, 0, 0.7);
+    padding: 10px;
+    transform: translateY(-100%);
+    opacity: 0;
+    transition: transform 0.3s ease, opacity 0.3s ease;
+    pointer-events: none;
+    z-index: 10;
+  }
+  
+  #controls-info {
+    display: none; /* Hide keyboard controls info on mobile */
+  }
+  
+  #mini-map-container {
+    width: 100px; /* Make mini-map smaller on mobile */
+    height: 100px;
+    position: absolute;
+    top: auto;
+    right: 10px;
+    bottom: 220px;
+  }
+  
+  /* Show mobile controls on touch devices */
+  #mobile-controls {
+    display: flex;
+  }
+  
+  /* Adjust other UI elements for mobile */
+  #player-menu, #friends-list, #whiteboard-container, #emote-menu {
+    width: 90%;
+    max-width: none;
+  }
+  
+  /* Make buttons bigger and easier to tap */
+  button {
+    min-height: 44px;
+    min-width: 44px;
+    padding: 10px;
+  }
+  
+  /* Adjust whiteboard for mobile */
+  #whiteboard-container {
+    width: 100%;
+    height: 80%;
+    top: 10%;
+  }
+  
+  /* Adjust emote menu for mobile */
+  #emote-menu {
+    bottom: 220px;
+    right: 10px;
+  }
+  
+  .emote-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+  
+  .emote-btn {
+    font-size: 24px;
+    padding: 15px;
+  }
+}
+
+/* Touch Detection - Will be set by JavaScript */
+.touch-device #mobile-controls {
+  display: flex;
+}
+
+/* Mobile UI Adjustments */
+.show-mobile-menu #game-ui {
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: auto;
 } 
