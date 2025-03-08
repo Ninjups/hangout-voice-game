@@ -208,11 +208,18 @@ io.on('connection', (socket) => {
       hasImage: !!data.customImage
     });
     
+    // Check if customImage is too large (over 1MB)
+    let customImage = data.customImage;
+    if (customImage && customImage.length > 1000000) {
+      console.warn(`Image for player ${data.id} is too large (${customImage.length} bytes), rejecting`);
+      customImage = null; // Don't store oversized images
+    }
+    
     if (players[data.id]) {
       // Update player properties
       if (data.name) players[data.id].name = data.name;
       if (data.color) players[data.id].color = data.color;
-      if (data.customImage !== undefined) players[data.id].customImage = data.customImage;
+      if (data.customImage !== undefined) players[data.id].customImage = customImage;
       
       console.log(`Player ${data.id} customized:`, {
         name: players[data.id].name,

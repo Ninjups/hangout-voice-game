@@ -10,13 +10,35 @@ const MINIMAP_SIZE = 200; // Size of the mini-map in pixels
 const MINIMAP_PADDING = 20; // Padding from the edge of the screen
 const JOYSTICK_MAX_DISTANCE = 40; // Maximum distance the joystick thumb can move
 
+// Map regions
+const MAP_REGIONS = [
+  // North West quadrant
+  { x: 0, y: 0, width: 3333, height: 3333, color: '#f0f8ff', name: 'North West' }, // Light blue
+  // North quadrant
+  { x: 3333, y: 0, width: 3334, height: 3333, color: '#f0fff0', name: 'North' }, // Light mint
+  // North East quadrant
+  { x: 6667, y: 0, width: 3333, height: 3333, color: '#fff0f8', name: 'North East' }, // Light pink
+  // West quadrant
+  { x: 0, y: 3333, width: 3333, height: 3334, color: '#fffff0', name: 'West' }, // Light yellow
+  // Center quadrant
+  { x: 3333, y: 3333, width: 3334, height: 3334, color: '#f8f8f8', name: 'Center' }, // Light gray
+  // East quadrant
+  { x: 6667, y: 3333, width: 3333, height: 3334, color: '#f0f0ff', name: 'East' }, // Light lavender
+  // South West quadrant
+  { x: 0, y: 6667, width: 3333, height: 3333, color: '#fff8f0', name: 'South West' }, // Light peach
+  // South quadrant
+  { x: 3333, y: 6667, width: 3334, height: 3333, color: '#f0ffff', name: 'South' }, // Light cyan
+  // South East quadrant
+  { x: 6667, y: 6667, width: 3333, height: 3333, color: '#f8f0ff', name: 'South East' } // Light purple
+];
+
 // Game state
 let canvas, ctx;
 let minimapCanvas, minimapCtx;
 let whiteboardCanvas, whiteboardCtx;
 let playerId;
 let players = {};
-let worldSize = { width: 3000, height: 3000 }; // This will be updated from server
+let worldSize = { width: 10000, height: 10000 }; // This will be updated from server
 let camera = { x: 0, y: 0 };
 let keys = {};
 let friends = [];
@@ -24,6 +46,7 @@ let mutedPlayers = [];
 let selectedPlayer = null;
 let customImage = null;
 let hideUserInfo = false; // Track whether user info is hidden
+let currentRegion = null; // Track the player's current region
 
 // Background particles
 let particles = [];
@@ -188,6 +211,17 @@ function setupInputHandlers() {
     e.stopPropagation(); // Stop event propagation
     document.getElementById('emote-menu').classList.toggle('hidden');
   });
+  
+  // Player menu buttons
+  document.getElementById('mute-player').addEventListener('click', muteSelectedPlayer);
+  document.getElementById('add-friend').addEventListener('click', addSelectedPlayerAsFriend);
+  document.getElementById('close-menu').addEventListener('click', closePlayerMenu);
+  
+  // See More Dracula button
+  document.getElementById('see-more-dracula').addEventListener('click', () => {
+    window.open('https://www.youtube.com/@plummcorpaudiovisual', '_blank');
+    closePlayerMenu();
+  });
 }
 
 // Set up login screen
@@ -205,16 +239,105 @@ function setupLoginScreen() {
   playerImageInput.addEventListener('change', (e) => {
     const file = e.target.files[0];
     if (file) {
+      // Check if the file is a GIF
+      const isGif = file.type === 'image/gif';
+      
+      if (isGif) {
+        console.log('GIF detected, preserving animation');
+      }
+      
       const reader = new FileReader();
       reader.onload = (event) => {
-        const img = document.createElement('img');
-        img.src = event.target.result;
-        customImage = event.target.result;
-        
-        // Clear previous preview
-        imagePreview.innerHTML = '';
-        imagePreview.appendChild(img);
+        // For GIFs, we'll use the original file to preserve animation
+        if (isGif) {
+          // Check file size for GIFs
+          if (file.size > 1000000) { // 1MB limit
+            alert('GIF is too large! Please use a smaller file (max 1MB).');
+            customImage = null;
+            imagePreview.innerHTML = '<p>Image too large</p>';
+            return;
+          }
+          
+          // Use the original GIF data
+          customImage = event.target.result;
+          
+          // Clear previous preview and show the image
+          imagePreview.innerHTML = '';
+          
+          // Create a preview with proper styling
+          const previewImg = document.createElement('img');
+          previewImg.src = event.target.result;
+          previewImg.style.maxWidth = '100px';
+          previewImg.style.maxHeight = '100px';
+          previewImg.style.borderRadius = '50%';
+          previewImg.style.objectFit = 'cover';
+          imagePreview.appendChild(previewImg);
+          
+          console.log(`GIF processed: Original size ${Math.round(file.size / 1024)}KB, preserved animation`);
+        } else {
+          // For non-GIFs, continue with the existing resize and compress logic
+          // Create an image element to get dimensions and process the image
+          const img = new Image();
+          img.onload = () => {
+            // Create a canvas to resize and compress the image
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Set maximum dimensions for the image (to reduce file size)
+            const MAX_WIDTH = 256;
+            const MAX_HEIGHT = 256;
+            
+            // Calculate new dimensions while maintaining aspect ratio
+            let width = img.width;
+            let height = img.height;
+            
+            if (width > height) {
+              if (width > MAX_WIDTH) {
+                height = Math.round(height * (MAX_WIDTH / width));
+                width = MAX_WIDTH;
+              }
+            } else {
+              if (height > MAX_HEIGHT) {
+                width = Math.round(width * (MAX_HEIGHT / height));
+                height = MAX_HEIGHT;
+              }
+            }
+            
+            // Set canvas dimensions and draw resized image
+            canvas.width = width;
+            canvas.height = height;
+            ctx.drawImage(img, 0, 0, width, height);
+            
+            // Convert to compressed JPEG format with quality 0.8
+            const compressedImage = canvas.toDataURL('image/jpeg', 0.8);
+            
+            // Store the compressed image data
+            customImage = compressedImage;
+            
+            // Clear previous preview and show the image
+            imagePreview.innerHTML = '';
+            
+            // Create a preview with proper styling
+            const previewImg = document.createElement('img');
+            previewImg.src = compressedImage;
+            previewImg.style.maxWidth = '100px';
+            previewImg.style.maxHeight = '100px';
+            previewImg.style.borderRadius = '50%';
+            previewImg.style.objectFit = 'cover';
+            imagePreview.appendChild(previewImg);
+            
+            console.log(`Image processed: Original ${img.width}x${img.height}, Compressed to ${width}x${height}`);
+          };
+          img.onerror = () => {
+            console.error('Failed to load the image');
+            imagePreview.innerHTML = '<p>Failed to load image</p>';
+            customImage = null;
+          };
+          img.src = event.target.result;
+        }
       };
+      
+      // Use readAsDataURL for all image types
       reader.readAsDataURL(file);
     }
   });
@@ -444,6 +567,23 @@ function connectToServer() {
   socket.on('player-emote', (data) => {
     if (data.id !== playerId) {
       showEmote(data.id, data.symbol);
+    }
+  });
+
+  // Handle player disconnection
+  socket.on('playerDisconnect', (id) => {
+    if (players[id]) {
+      // Clean up any GIF animation intervals
+      if (players[id].gifAnimationInterval) {
+        console.log(`Cleaning up GIF animation for player ${id}`);
+        clearInterval(players[id].gifAnimationInterval);
+        players[id].gifAnimationInterval = null;
+        players[id].gifAnimator = null;
+      }
+      
+      delete players[id];
+      updatePlayerCount();
+      updateFriendsList();
     }
   });
 }
@@ -801,6 +941,15 @@ function update() {
   // Handle player movement
   handlePlayerMovement();
   
+  // Update camera position to follow player
+  if (players[playerId]) {
+    camera.x = players[playerId].x - canvas.width / 2;
+    camera.y = players[playerId].y - canvas.height / 2;
+    
+    // Check if player has entered a new region
+    checkPlayerRegion();
+  }
+  
   // Update particles
   updateParticles();
   
@@ -840,9 +989,21 @@ function render() {
   // Draw particles
   drawParticles();
 
-  // Draw all players
+  // Draw players in two passes: first regular players, then bots
+  // This ensures bots are always on top and visible
+  
+  // First pass: Draw regular players
   for (const id in players) {
-    drawPlayer(players[id]);
+    if (!players[id].isBot) {
+      drawPlayer(players[id]);
+    }
+  }
+  
+  // Second pass: Draw bots on top
+  for (const id in players) {
+    if (players[id].isBot) {
+      drawPlayer(players[id]);
+    }
   }
   
   // Update mini-map
@@ -851,12 +1012,44 @@ function render() {
 
 // Draw grid
 function drawGrid() {
-  // Draw background color gradient
-  const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-  gradient.addColorStop(0, '#f0f8ff'); // Light blue
-  gradient.addColorStop(1, '#e6f2ff'); // Slightly different light blue
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  // Define map regions with different colors
+  const regions = MAP_REGIONS;
+  
+  // Draw background regions
+  for (const region of regions) {
+    // Calculate screen coordinates
+    const screenX = region.x - camera.x;
+    const screenY = region.y - camera.y;
+    
+    // Only draw if region is visible on screen
+    if (screenX < canvas.width && 
+        screenY < canvas.height && 
+        screenX + region.width > 0 && 
+        screenY + region.height > 0) {
+      
+      ctx.fillStyle = region.color;
+      ctx.fillRect(
+        Math.max(0, screenX), 
+        Math.max(0, screenY), 
+        Math.min(canvas.width - screenX, region.width), 
+        Math.min(canvas.height - screenY, region.height)
+      );
+      
+      // Draw region name in the center
+      const centerX = screenX + region.width / 2;
+      const centerY = screenY + region.height / 2;
+      
+      // Only draw text if center is visible
+      if (centerX > 0 && centerX < canvas.width && 
+          centerY > 0 && centerY < canvas.height) {
+        ctx.font = '24px Arial';
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(region.name, centerX, centerY);
+      }
+    }
+  }
   
   const gridSize = 100;
   const offsetX = -camera.x % gridSize;
@@ -904,6 +1097,32 @@ function drawGrid() {
     ctx.moveTo(0, y);
     ctx.lineTo(canvas.width, y);
     ctx.stroke();
+  }
+  
+  // Draw region borders (thicker lines at region boundaries)
+  ctx.strokeStyle = 'rgba(100, 120, 140, 0.8)'; // Darker blue, more opaque
+  ctx.lineWidth = 3;
+  
+  // Vertical region borders
+  for (let i = 1; i < 3; i++) {
+    const x = (worldSize.width / 3) * i - camera.x;
+    if (x > 0 && x < canvas.width) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, canvas.height);
+      ctx.stroke();
+    }
+  }
+  
+  // Horizontal region borders
+  for (let i = 1; i < 3; i++) {
+    const y = (worldSize.height / 3) * i - camera.y;
+    if (y > 0 && y < canvas.height) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(canvas.width, y);
+      ctx.stroke();
+    }
   }
   
   // Draw ambient elements (dots at grid intersections)
@@ -973,24 +1192,123 @@ function drawPlayer(player) {
     // Create image if it doesn't exist yet
     if (!player.imageObj) {
       player.imageObj = new Image();
-      player.imageObj.src = player.customImage;
+      player.imageObj.crossOrigin = 'Anonymous'; // Handle CORS issues
+      player.imageLoadAttempts = player.imageLoadAttempts || 0;
+      
+      // Check if this is a GIF by looking at the data URL header
+      player.isGif = player.customImage && player.customImage.startsWith('data:image/gif');
+      
       player.imageObj.onload = () => {
-        console.log(`Image loaded for player ${player.id}`);
+        console.log(`Image loaded for player ${player.id}${player.isGif ? ' (GIF)' : ''}`);
+        player.imageLoadAttempts = 0; // Reset attempts on success
+        
+        // For GIFs, we need to trigger redraws to animate them
+        if (player.isGif && !player.gifAnimationInterval) {
+          console.log(`Setting up GIF animation for player ${player.id}`);
+          
+          // Create a new image element for the GIF that will be constantly reloaded
+          // This forces the browser to re-render the GIF animation
+          player.gifAnimator = new Image();
+          player.gifAnimator.crossOrigin = 'Anonymous';
+          
+          // Force a redraw every 50ms to ensure GIF animation plays
+          player.gifAnimationInterval = setInterval(() => {
+            // Only create the interval if the player is still in the game
+            if (players[player.id]) {
+              // Reload the GIF with a cache-busting parameter to force animation
+              const timestamp = Date.now();
+              player.gifAnimator.src = player.customImage + '?t=' + timestamp;
+              
+              // When the animator loads, update the main image
+              player.gifAnimator.onload = () => {
+                // This will trigger a redraw of the player, advancing the GIF animation
+                player.imageObj.src = player.gifAnimator.src;
+                player.lastGifUpdate = timestamp;
+              };
+            } else {
+              // Clean up the interval if the player is gone
+              clearInterval(player.gifAnimationInterval);
+              player.gifAnimationInterval = null;
+              player.gifAnimator = null;
+            }
+          }, 100); // Slightly slower refresh rate to reduce performance impact
+        }
       };
+      
       player.imageObj.onerror = (e) => {
-        console.error(`Error loading image for player ${player.id}:`, e);
-        // Fall back to color
-        player.imageObj = null;
+        player.imageLoadAttempts++;
+        console.error(`Error loading image for player ${player.id} (attempt ${player.imageLoadAttempts}):`, e);
+        
+        if (player.imageLoadAttempts < 3) {
+          // Try again with a cache-busting parameter
+          setTimeout(() => {
+            if (player.imageObj) {
+              player.imageObj.src = player.customImage + '?retry=' + new Date().getTime();
+            }
+          }, 1000);
+        } else {
+          // After 3 attempts, fall back to color
+          console.warn(`Giving up on loading image for player ${player.id} after ${player.imageLoadAttempts} attempts`);
+          player.imageObj = null;
+          player.customImage = null; // Clear the custom image to prevent further attempts
+          
+          // Clean up any GIF animation interval
+          if (player.gifAnimationInterval) {
+            console.log(`Cleaning up GIF animation for player ${player.id} due to load failure`);
+            clearInterval(player.gifAnimationInterval);
+            player.gifAnimationInterval = null;
+            player.gifAnimator = null;
+            player.isGif = false;
+          }
+        }
       };
+      
+      player.imageObj.src = player.customImage;
     }
     
     // If image is loaded, draw it
-    if (player.imageObj && player.imageObj.complete) {
-      // Create circular clipping path
-      ctx.clip();
-      
-      // Draw the image
-      ctx.drawImage(player.imageObj, screenX - PLAYER_RADIUS, screenY - PLAYER_RADIUS, PLAYER_RADIUS * 2, PLAYER_RADIUS * 2);
+    if (player.imageObj && player.imageObj.complete && player.imageObj.naturalWidth > 0) {
+      try {
+        // Create circular clipping path
+        ctx.clip();
+        
+        // Calculate dimensions to maintain aspect ratio
+        let drawWidth, drawHeight, offsetX, offsetY;
+        const imgAspect = player.imageObj.width / player.imageObj.height;
+        
+        if (imgAspect >= 1) {
+          // Image is wider than tall or square
+          drawHeight = PLAYER_RADIUS * 2;
+          drawWidth = drawHeight * imgAspect;
+          offsetX = (drawWidth - PLAYER_RADIUS * 2) / 2;
+          offsetY = 0;
+        } else {
+          // Image is taller than wide
+          drawWidth = PLAYER_RADIUS * 2;
+          drawHeight = drawWidth / imgAspect;
+          offsetX = 0;
+          offsetY = (drawHeight - PLAYER_RADIUS * 2) / 2;
+        }
+        
+        // Draw the image centered
+        ctx.drawImage(
+          player.imageObj, 
+          screenX - PLAYER_RADIUS - offsetX, 
+          screenY - PLAYER_RADIUS - offsetY, 
+          drawWidth, 
+          drawHeight
+        );
+        
+        // For GIFs, we need to track the last update time to ensure animation continues
+        if (player.isGif) {
+          player.lastGifUpdate = Date.now();
+        }
+      } catch (err) {
+        console.error(`Error drawing player image for ${player.id}:`, err);
+        // Fall back to color on drawing error
+        ctx.fillStyle = hideUserInfo ? '#cccccc' : (player.color || '#cccccc');
+        ctx.fill();
+      }
     } else {
       // Fall back to color while image is loading
       ctx.fillStyle = hideUserInfo ? '#cccccc' : (player.color || '#cccccc');
@@ -1003,6 +1321,24 @@ function drawPlayer(player) {
   }
   
   ctx.restore();
+
+  // Add a highlight border for the current player
+  if (player.id === playerId) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(screenX, screenY, PLAYER_RADIUS + 2, 0, Math.PI * 2);
+    ctx.strokeStyle = '#00FFFF'; // Bright cyan to match minimap
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    
+    // Add a black outer stroke for contrast
+    ctx.beginPath();
+    ctx.arc(screenX, screenY, PLAYER_RADIUS + 4, 0, Math.PI * 2);
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.restore();
+  }
 
   // Draw movement direction indicator if player has velocity
   if (player.velocityX !== undefined && player.velocityY !== undefined) {
@@ -1042,10 +1378,73 @@ function drawPlayer(player) {
 
   // Draw bot indicator if it's a bot
   if (player.isBot) {
-    ctx.font = 'bold 14px Arial';
+    // Add pulsing glow effect for bots
+    if (!player.pulseValue) {
+      player.pulseValue = 0;
+      player.pulseDirection = 1;
+    }
+    
+    // Update pulse animation
+    player.pulseValue += 0.05 * player.pulseDirection;
+    if (player.pulseValue >= 1) {
+      player.pulseDirection = -1;
+    } else if (player.pulseValue <= 0) {
+      player.pulseDirection = 1;
+    }
+    
+    // Draw outer glow BEHIND the player (not on top of it)
+    ctx.save();
+    const glowSize = 8 + 4 * player.pulseValue; // Pulsing effect
+    
+    // Create a clipping path that excludes the player circle
+    ctx.beginPath();
+    ctx.arc(screenX, screenY, PLAYER_RADIUS + glowSize + 2, 0, Math.PI * 2);
+    ctx.arc(screenX, screenY, PLAYER_RADIUS, 0, Math.PI * 2, true); // Counter-clockwise to create hole
+    ctx.clip();
+    
+    // Draw the glow in the clipped area (ring around player)
+    ctx.beginPath();
+    ctx.arc(screenX, screenY, PLAYER_RADIUS + glowSize, 0, Math.PI * 2);
+    const gradient = ctx.createRadialGradient(
+      screenX, screenY, PLAYER_RADIUS,
+      screenX, screenY, PLAYER_RADIUS + glowSize
+    );
+    gradient.addColorStop(0, 'rgba(255, 215, 0, 0.9)'); // Gold color
+    gradient.addColorStop(1, 'rgba(255, 215, 0, 0)');
+    ctx.fillStyle = gradient;
+    ctx.fill();
+    ctx.restore();
+    
+    // Draw bot text with improved visibility
+    ctx.font = 'bold 16px Arial';
     ctx.fillStyle = '#FF5733';
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 3;
     ctx.textAlign = 'center';
-    ctx.fillText('BOT', screenX, screenY - PLAYER_RADIUS - 10);
+    ctx.strokeText('BOT', screenX, screenY - PLAYER_RADIUS - 12);
+    ctx.fillText('BOT', screenX, screenY - PLAYER_RADIUS - 12);
+    
+    // Draw crown icon above bot
+    ctx.beginPath();
+    const crownSize = 10;
+    const crownY = screenY - PLAYER_RADIUS - 30;
+    
+    // Draw crown base
+    ctx.moveTo(screenX - crownSize, crownY);
+    ctx.lineTo(screenX + crownSize, crownY);
+    ctx.lineTo(screenX + crownSize * 0.8, crownY - crownSize * 0.6);
+    ctx.lineTo(screenX + crownSize * 0.4, crownY);
+    ctx.lineTo(screenX, crownY - crownSize * 0.8);
+    ctx.lineTo(screenX - crownSize * 0.4, crownY);
+    ctx.lineTo(screenX - crownSize * 0.8, crownY - crownSize * 0.6);
+    ctx.closePath();
+    
+    // Fill crown with gold color
+    ctx.fillStyle = '#FFD700';
+    ctx.fill();
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
   }
 
   // Draw player name if not hiding user info
@@ -1105,6 +1504,7 @@ function showPlayerMenu(player, x, y) {
   const menuPlayerName = document.getElementById('menu-player-name');
   const muteButton = document.getElementById('mute-player');
   const addFriendButton = document.getElementById('add-friend');
+  const seeMoreDraculaButton = document.getElementById('see-more-dracula');
   
   // Set player name in menu
   menuPlayerName.textContent = player.name + (player.isBot ? ' (BOT)' : '');
@@ -1125,6 +1525,13 @@ function showPlayerMenu(player, x, y) {
   } else {
     addFriendButton.textContent = 'Add Friend';
     addFriendButton.classList.remove('friend-added');
+  }
+  
+  // Show "See More Dracula" button only for the bot
+  if (player.isBot) {
+    seeMoreDraculaButton.classList.remove('hidden');
+  } else {
+    seeMoreDraculaButton.classList.add('hidden');
   }
   
   // Position menu
@@ -1551,18 +1958,47 @@ function updateMiniMap() {
   // Clear mini-map
   minimapCtx.clearRect(0, 0, MINIMAP_SIZE, MINIMAP_SIZE);
   
-  // Draw mini-map background
-  minimapCtx.fillStyle = 'rgba(0, 0, 0, 0.3)';
-  minimapCtx.fillRect(0, 0, MINIMAP_SIZE, MINIMAP_SIZE);
+  // Calculate scale factor
+  const scaleX = MINIMAP_SIZE / worldSize.width;
+  const scaleY = MINIMAP_SIZE / worldSize.height;
+  
+  // Draw map regions on mini-map
+  for (const region of MAP_REGIONS) {
+    const miniX = region.x * scaleX;
+    const miniY = region.y * scaleY;
+    const miniWidth = region.width * scaleX;
+    const miniHeight = region.height * scaleY;
+    
+    minimapCtx.fillStyle = region.color;
+    minimapCtx.fillRect(miniX, miniY, miniWidth, miniHeight);
+  }
+  
+  // Draw region borders
+  minimapCtx.strokeStyle = 'rgba(100, 120, 140, 0.8)';
+  minimapCtx.lineWidth = 1;
+  
+  // Vertical region borders
+  for (let i = 1; i < 3; i++) {
+    const x = (worldSize.width / 3) * i * scaleX;
+    minimapCtx.beginPath();
+    minimapCtx.moveTo(x, 0);
+    minimapCtx.lineTo(x, MINIMAP_SIZE);
+    minimapCtx.stroke();
+  }
+  
+  // Horizontal region borders
+  for (let i = 1; i < 3; i++) {
+    const y = (worldSize.height / 3) * i * scaleY;
+    minimapCtx.beginPath();
+    minimapCtx.moveTo(0, y);
+    minimapCtx.lineTo(MINIMAP_SIZE, y);
+    minimapCtx.stroke();
+  }
   
   // Draw mini-map border
   minimapCtx.strokeStyle = '#fff';
   minimapCtx.lineWidth = 2;
   minimapCtx.strokeRect(0, 0, MINIMAP_SIZE, MINIMAP_SIZE);
-  
-  // Calculate scale factor
-  const scaleX = MINIMAP_SIZE / worldSize.width;
-  const scaleY = MINIMAP_SIZE / worldSize.height;
   
   // Draw all players on mini-map
   for (const id in players) {
@@ -1570,22 +2006,32 @@ function updateMiniMap() {
     const miniX = player.x * scaleX;
     const miniY = player.y * scaleY;
     
-    // Draw player dot
-    minimapCtx.beginPath();
-    minimapCtx.arc(miniX, miniY, id === playerId ? 4 : 3, 0, Math.PI * 2);
-    
-    // Current player is white, friends are green, others are their color or default if hiding user info
+    // Draw player dot with border for better visibility
     if (id === playerId) {
-      minimapCtx.fillStyle = '#ffffff';
-    } else if (friends.includes(id)) {
-      minimapCtx.fillStyle = '#4CAF50';
-    } else if (player.isBot) {
-      minimapCtx.fillStyle = '#FF5733';
+      // Current player gets a larger dot with a black border
+      minimapCtx.beginPath();
+      minimapCtx.arc(miniX, miniY, 6, 0, Math.PI * 2);
+      minimapCtx.fillStyle = '#00FFFF'; // Bright cyan for high visibility
+      minimapCtx.fill();
+      minimapCtx.strokeStyle = '#000000';
+      minimapCtx.lineWidth = 2;
+      minimapCtx.stroke();
     } else {
-      minimapCtx.fillStyle = hideUserInfo ? '#cccccc' : (player.color || '#cccccc');
+      // Other players
+      minimapCtx.beginPath();
+      minimapCtx.arc(miniX, miniY, 3, 0, Math.PI * 2);
+      
+      // Friends are green, bots are orange, others are their color or default if hiding user info
+      if (friends.includes(id)) {
+        minimapCtx.fillStyle = '#4CAF50';
+      } else if (player.isBot) {
+        minimapCtx.fillStyle = '#FF5733';
+      } else {
+        minimapCtx.fillStyle = hideUserInfo ? '#cccccc' : (player.color || '#cccccc');
+      }
+      
+      minimapCtx.fill();
     }
-    
-    minimapCtx.fill();
   }
   
   // Draw viewport rectangle
@@ -1597,6 +2043,27 @@ function updateMiniMap() {
   minimapCtx.strokeStyle = '#ffffff';
   minimapCtx.lineWidth = 1;
   minimapCtx.strokeRect(viewX, viewY, viewWidth, viewHeight);
+  
+  // Draw region name for player's current location
+  if (players[playerId]) {
+    const playerX = players[playerId].x;
+    const playerY = players[playerId].y;
+    
+    // Find which region the player is in
+    for (const region of MAP_REGIONS) {
+      if (playerX >= region.x && playerX < region.x + region.width &&
+          playerY >= region.y && playerY < region.y + region.height) {
+        
+        // Draw region name at the top of the mini-map
+        minimapCtx.font = '12px Arial';
+        minimapCtx.fillStyle = '#ffffff';
+        minimapCtx.textAlign = 'center';
+        minimapCtx.textBaseline = 'top';
+        minimapCtx.fillText(`Location: ${region.name}`, MINIMAP_SIZE / 2, 5);
+        break;
+      }
+    }
+  }
 }
 
 // Handle mini-map click
@@ -2242,4 +2709,27 @@ function handleMobileInteract() {
 function toggleMobileMenu() {
   const gameUI = document.getElementById('game-ui');
   gameUI.classList.toggle('show-mobile-menu');
+}
+
+// Check if player has entered a new region
+function checkPlayerRegion() {
+  if (!players[playerId]) return;
+  
+  const playerX = players[playerId].x;
+  const playerY = players[playerId].y;
+  
+  // Find which region the player is in
+  for (const region of MAP_REGIONS) {
+    if (playerX >= region.x && playerX < region.x + region.width &&
+        playerY >= region.y && playerY < region.y + region.height) {
+      
+      // If player has entered a new region, show a notification
+      if (!currentRegion || currentRegion.name !== region.name) {
+        showToast(`Entered: ${region.name}`);
+        currentRegion = region;
+      }
+      
+      return;
+    }
+  }
 } 

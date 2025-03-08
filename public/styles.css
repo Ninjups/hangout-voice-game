@@ -260,6 +260,23 @@ body {
   background-color: #bbb !important;
 }
 
+/* Special styling for the See More Dracula button */
+#see-more-dracula {
+  background-color: #800020 !important; /* Dark red/burgundy color */
+  color: #fff !important;
+  font-weight: bold;
+  text-shadow: 0 0 3px #000;
+  border: 1px solid #500 !important;
+  box-shadow: 0 0 5px rgba(128, 0, 32, 0.5);
+  transition: all 0.3s ease;
+}
+
+#see-more-dracula:hover {
+  background-color: #a00030 !important;
+  transform: scale(1.05);
+  box-shadow: 0 0 10px rgba(160, 0, 48, 0.7);
+}
+
 /* Friends List Styles */
 #friends-list {
   position: absolute;
