@@ -421,28 +421,40 @@ function connectToServer() {
     console.log(`Initialized with player ID: ${playerId}`);
   });
 
-  // Handle player joined
-  socket.on('playerJoined', (player) => {
-    console.log(`Player joined: ${player.id}`);
-    players[player.id] = player;
+  // Handle new player joined
+  socket.on('playerJoined', (data) => {
+    console.log(`New player joined: ${data.id}`);
     
-    // Initialize velocity if not present
-    if (players[player.id].velocityX === undefined) {
-      players[player.id].velocityX = 0;
-      players[player.id].velocityY = 0;
+    // Add player to the game
+    players[data.id] = {
+      id: data.id,
+      x: data.x,
+      y: data.y,
+      velocityX: 0,
+      velocityY: 0,
+      color: data.color,
+      name: data.name || 'Player',
+      isSpeaking: false,
+      isBot: data.isBot || false,
+      customImage: data.customImage || null
+    };
+    
+    // Set up WebRTC connection if microphone is enabled
+    if (isMicEnabled && !data.isBot && data.id !== playerId) {
+      console.log(`Setting up WebRTC with new player: ${data.id}`);
+      // Add a small delay to ensure the player is fully initialized
+      setTimeout(() => {
+        setupPeerConnection(data.id);
+      }, 1000);
     }
     
+    // If it's a bot, set up bot sounds
+    if (data.isBot && data.botSoundFile) {
+      setupBotSound(data.id, data.botSoundFile);
+    }
+    
+    // Update player count
     updatePlayerCount();
-    
-    // Set up WebRTC connection for the new player if not a bot
-    if (isMicEnabled && !player.isBot) {
-      setupPeerConnection(player.id);
-    }
-    
-    // Set up bot sound if it's a bot
-    if (player.isBot && player.botSoundFile) {
-      setupBotSound(player.id, player.botSoundFile);
-    }
   });
 
   // Handle player left
@@ -1706,6 +1718,29 @@ async function requestMicrophoneAccess() {
           await audioContext.resume();
         }
       }
+      
+      // For iOS, we need to ensure the audio session is properly configured
+      document.addEventListener('touchstart', function iosTouchStart() {
+        // Resume audio context on first touch
+        if (audioContext && audioContext.state === 'suspended') {
+          audioContext.resume().then(() => {
+            console.log('Audio context resumed on iOS touch');
+          });
+        }
+        
+        // Play and immediately pause a silent audio to unlock audio
+        const silentAudio = new Audio();
+        silentAudio.setAttribute('src', 'data:audio/mp3;base64,//uQxAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAACcQCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA//////////////////////////////////////////////////////////////////8AAABhTEFNRTMuMTAwA8MAAAAAAAAAABQgJAUHQQAB9AAAAnGMHkkIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//sQxAADgnABGiAAQBCqgCRMAAgEAH///////////////7+n/9FTuQsQH//////2NG0jWUGlio5gLQTOtIoeR2WX////X4s9Atb/JRVCbBUpeRUq//////////////////9RUi0f2jn/+xDECgPCjAEQAABN4AAANIAAAAQVTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVQ==');
+        silentAudio.load();
+        silentAudio.play().then(() => {
+          silentAudio.pause();
+          silentAudio.currentTime = 0;
+          document.removeEventListener('touchstart', iosTouchStart);
+          console.log('iOS audio unlocked');
+        }).catch(e => {
+          console.warn('Failed to unlock iOS audio:', e);
+        });
+      }, {once: true});
     }
     
     console.log("Requesting microphone access with constraints:", audioConstraints);
@@ -1730,9 +1765,12 @@ async function requestMicrophoneAccess() {
         setupPeerConnection(id);
       }
     }
+    
+    return Promise.resolve();
   } catch (error) {
     console.error('Error accessing microphone:', error);
     alert('Could not access microphone. Voice chat will be disabled.');
+    return Promise.reject(error);
   }
 }
 
@@ -1849,6 +1887,12 @@ function setupPeerConnection(peerId) {
   
   console.log(`Setting up WebRTC connection with peer: ${peerId}`);
   
+  // Clean up any existing connection first
+  if (peerConnections[peerId]) {
+    console.log(`Cleaning up existing connection with ${peerId} before creating a new one`);
+    cleanupPeerConnection(peerId);
+  }
+  
   // Create new RTCPeerConnection with more STUN/TURN servers for better connectivity
   const peerConnection = new RTCPeerConnection({
     iceServers: [
@@ -1856,7 +1900,18 @@ function setupPeerConnection(peerId) {
       { urls: 'stun:stun1.l.google.com:19302' },
       { urls: 'stun:stun2.l.google.com:19302' },
       { urls: 'stun:stun3.l.google.com:19302' },
-      { urls: 'stun:stun4.l.google.com:19302' }
+      { urls: 'stun:stun4.l.google.com:19302' },
+      // Add free TURN servers for better NAT traversal
+      {
+        urls: 'turn:openrelay.metered.ca:80',
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+      },
+      {
+        urls: 'turn:openrelay.metered.ca:443',
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+      }
     ],
     iceCandidatePoolSize: 10,
     bundlePolicy: 'max-bundle',
@@ -1866,6 +1921,22 @@ function setupPeerConnection(peerId) {
   // Log connection state changes for debugging
   peerConnection.oniceconnectionstatechange = () => {
     console.log(`ICE connection state with ${peerId}: ${peerConnection.iceConnectionState}`);
+    
+    // Handle connection failures
+    if (peerConnection.iceConnectionState === 'failed' || 
+        peerConnection.iceConnectionState === 'disconnected' ||
+        peerConnection.iceConnectionState === 'closed') {
+      
+      console.log(`WebRTC connection with ${peerId} is in state ${peerConnection.iceConnectionState}, attempting to reconnect...`);
+      
+      // Schedule a reconnection attempt
+      setTimeout(() => {
+        if (players[peerId] && !players[peerId].isBot) {
+          console.log(`Attempting to reconnect with ${peerId}`);
+          setupPeerConnection(peerId);
+        }
+      }, 2000);
+    }
   };
   
   peerConnection.onconnectionstatechange = () => {
@@ -1878,10 +1949,15 @@ function setupPeerConnection(peerId) {
   
   // Add local stream
   try {
-    localStream.getTracks().forEach(track => {
-      console.log(`Adding track to peer connection: ${track.kind}`);
-      peerConnection.addTrack(track, localStream);
-    });
+    if (localStream) {
+      localStream.getTracks().forEach(track => {
+        console.log(`Adding track to peer connection: ${track.kind}`);
+        peerConnection.addTrack(track, localStream);
+      });
+    } else {
+      console.error(`Cannot add tracks to peer ${peerId} - localStream is not available`);
+      return; // Exit if no local stream
+    }
   } catch (error) {
     console.error('Error adding tracks to peer connection:', error);
   }
@@ -1897,37 +1973,87 @@ function setupPeerConnection(peerId) {
     }
   };
   
+  // Handle ICE gathering state changes
+  peerConnection.onicegatheringstatechange = () => {
+    console.log(`ICE gathering state with ${peerId}: ${peerConnection.iceGatheringState}`);
+  };
+  
+  // Handle negotiation needed events
+  peerConnection.onnegotiationneeded = () => {
+    console.log(`Negotiation needed for peer ${peerId}`);
+    createAndSendOffer(peerConnection, peerId);
+  };
+  
   // Handle incoming tracks
   peerConnection.ontrack = (event) => {
     console.log(`Received track from ${peerId}: ${event.track.kind}`);
     
     // Create audio element for remote stream
     const audio = document.createElement('audio');
+    audio.id = `audio-${peerId}`;
     audio.srcObject = event.streams[0];
     audio.autoplay = true;
+    audio.volume = 1.0; // Start with full volume
     
-    // iOS Safari requires user interaction to play audio
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-    if (isIOS) {
-      // Add to DOM to make it work on iOS
-      audio.style.display = 'none';
-      document.body.appendChild(audio);
-      
-      // Try to play with error handling
-      audio.play().catch(err => {
-        console.warn('Auto-play failed (expected on iOS):', err);
+    // Critical for iOS - must be set before play attempt
+    audio.setAttribute('playsinline', '');
+    audio.setAttribute('webkit-playsinline', '');
+    
+    // Add to DOM to make it work on iOS and other mobile browsers
+    audio.style.display = 'none';
+    document.body.appendChild(audio);
+    
+    console.log(`Audio element created for ${peerId} with id: audio-${peerId}`);
+    
+    // Try to play with error handling
+    const playPromise = audio.play();
+    if (playPromise !== undefined) {
+      playPromise.then(() => {
+        console.log(`Audio playback started successfully for peer ${peerId}`);
+      }).catch(err => {
+        console.warn(`Auto-play failed for peer ${peerId}:`, err);
         
-        // iOS requires user interaction, we'll try to play when user interacts
+        // For iOS and other browsers that require user interaction
         const resumeAudio = () => {
+          console.log(`Attempting to play audio for ${peerId} after user interaction`);
           audio.play().then(() => {
-            console.log('Audio playback started after user interaction');
+            console.log(`Audio playback started for ${peerId} after user interaction`);
             document.removeEventListener('touchstart', resumeAudio);
             document.removeEventListener('click', resumeAudio);
-          }).catch(e => console.error('Still failed to play audio:', e));
+          }).catch(e => {
+            console.error(`Still failed to play audio for ${peerId}:`, e);
+            
+            // Try one more approach - recreate the audio element
+            setTimeout(() => {
+              console.log(`Recreating audio element for ${peerId}`);
+              const newAudio = document.createElement('audio');
+              newAudio.id = `audio-${peerId}-retry`;
+              newAudio.srcObject = event.streams[0];
+              newAudio.autoplay = true;
+              newAudio.setAttribute('playsinline', '');
+              newAudio.setAttribute('webkit-playsinline', '');
+              newAudio.style.display = 'none';
+              document.body.appendChild(newAudio);
+              
+              newAudio.play().catch(finalErr => {
+                console.error(`Final attempt to play audio for ${peerId} failed:`, finalErr);
+              });
+              
+              // Update the reference
+              audioElements[peerId] = newAudio;
+            }, 1000);
+          });
         };
         
+        // Listen for any user interaction to start audio
         document.addEventListener('touchstart', resumeAudio, { once: true });
         document.addEventListener('click', resumeAudio, { once: true });
+        
+        // Also try to play on the next user interaction with the mic button
+        const mobileMicBtn = document.getElementById('mobile-mic-btn');
+        if (mobileMicBtn) {
+          mobileMicBtn.addEventListener('touchstart', resumeAudio, { once: true });
+        }
       });
     }
     
@@ -1936,17 +2062,41 @@ function setupPeerConnection(peerId) {
     
     // Set initial volume based on distance
     updateAudioVolume(peerId);
+    
+    // Add a periodic check to ensure audio is playing
+    const audioCheckInterval = setInterval(() => {
+      if (!audioElements[peerId]) {
+        clearInterval(audioCheckInterval);
+        return;
+      }
+      
+      const audioEl = audioElements[peerId];
+      if (audioEl.paused && shouldHearPlayer(peerId)) {
+        console.log(`Audio for ${peerId} is paused but should be playing, attempting to restart`);
+        audioEl.play().catch(e => {
+          console.warn(`Failed to restart audio for ${peerId}:`, e);
+        });
+      }
+    }, 5000);
   };
   
   // Store peer connection
   peerConnections[peerId] = peerConnection;
   
   // Create and send offer
+  createAndSendOffer(peerConnection, peerId);
+}
+
+// Helper function to create and send an offer
+function createAndSendOffer(peerConnection, peerId) {
   peerConnection.createOffer({
     offerToReceiveAudio: true,
     voiceActivityDetection: true
   })
-    .then(offer => peerConnection.setLocalDescription(offer))
+    .then(offer => {
+      console.log(`Setting local description for ${peerId}`);
+      return peerConnection.setLocalDescription(offer);
+    })
     .then(() => {
       console.log(`Sending WebRTC offer to ${peerId}`);
       socket.emit('webrtc-offer', {
@@ -1954,7 +2104,17 @@ function setupPeerConnection(peerId) {
         to: peerId
       });
     })
-    .catch(error => console.error('Error creating offer:', error));
+    .catch(error => {
+      console.error(`Error creating offer for ${peerId}:`, error);
+      
+      // Try to recover by recreating the connection after a delay
+      setTimeout(() => {
+        if (players[peerId] && !players[peerId].isBot) {
+          console.log(`Retrying connection with ${peerId} after offer failure`);
+          setupPeerConnection(peerId);
+        }
+      }, 3000);
+    });
 }
 
 // Handle WebRTC offer
@@ -2092,15 +2252,69 @@ function updateAudioVolume(peerId) {
   const dy = players[playerId].y - players[peerId].y;
   const distance = Math.sqrt(dx * dx + dy * dy);
   
-  // Calculate volume based on distance (quadratic falloff for more natural sound attenuation)
-  // This creates a steeper volume drop-off as distance increases
-  let volume = 1 - Math.pow(distance / VOICE_MAX_DISTANCE, 2);
-  volume = Math.max(0, Math.min(1, volume));
+  // Maximum distance for audio (adjust as needed)
+  const MAX_AUDIO_DISTANCE = 500;
   
-  // Apply volume if not muted
-  if (!mutedPlayers.includes(peerId)) {
-    audioElements[peerId].volume = volume;
+  // Calculate volume based on distance (0 to 1)
+  let volume = 0;
+  
+  if (distance <= MAX_AUDIO_DISTANCE) {
+    // Linear falloff based on distance
+    volume = 1 - (distance / MAX_AUDIO_DISTANCE);
+    
+    // Apply a curve to make it sound more natural
+    volume = Math.pow(volume, 1.5);
+    
+    // Ensure minimum volume when in range
+    volume = Math.max(0.1, volume);
   }
+  
+  // Check if player is muted
+  if (mutedPlayers.includes(peerId)) {
+    volume = 0;
+  }
+  
+  // Apply volume to audio element
+  try {
+    const audioEl = audioElements[peerId];
+    
+    // Debug log for volume changes
+    if (Math.abs(audioEl.volume - volume) > 0.1) {
+      console.log(`Updating volume for ${peerId} to ${volume.toFixed(2)} (distance: ${distance.toFixed(0)}px)`);
+    }
+    
+    audioEl.volume = volume;
+    
+    // If volume is 0, we can pause the audio to save resources
+    if (volume === 0 && !audioEl.paused) {
+      audioEl.pause();
+    } else if (volume > 0 && audioEl.paused) {
+      // Try to play if it should be audible but is paused
+      audioEl.play().catch(e => {
+        console.warn(`Failed to resume audio for ${peerId}:`, e);
+      });
+    }
+  } catch (e) {
+    console.error(`Error updating audio volume for ${peerId}:`, e);
+  }
+}
+
+// Helper function to determine if we should hear a player
+function shouldHearPlayer(peerId) {
+  if (!players[playerId] || !players[peerId]) return false;
+  
+  // Check if player is muted
+  if (mutedPlayers.includes(peerId)) return false;
+  
+  // Calculate distance between players
+  const dx = players[playerId].x - players[peerId].x;
+  const dy = players[playerId].y - players[peerId].y;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+  
+  // Maximum distance for audio
+  const MAX_AUDIO_DISTANCE = 500;
+  
+  return distance <= MAX_AUDIO_DISTANCE;
 }
 
 // Check speaking status
