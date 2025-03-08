@@ -1683,7 +1683,38 @@ function updatePlayerCount() {
 // Request microphone access
 async function requestMicrophoneAccess() {
   try {
-    localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    // Special handling for iOS Safari
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+    
+    // Different audio constraints for mobile vs desktop
+    const audioConstraints = {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true
+    };
+    
+    // iOS Safari needs special handling
+    if (isIOS) {
+      console.log("iOS device detected, using special audio handling");
+      
+      // Force audio context to initialize first (iOS requirement)
+      if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        // Resume audio context - needed for iOS
+        if (audioContext.state === 'suspended') {
+          await audioContext.resume();
+        }
+      }
+    }
+    
+    console.log("Requesting microphone access with constraints:", audioConstraints);
+    localStream = await navigator.mediaDevices.getUserMedia({ 
+      audio: audioConstraints, 
+      video: false 
+    });
+    
+    console.log("Microphone access granted");
     
     // Enable microphone
     isMicEnabled = true;
@@ -1710,67 +1741,105 @@ function toggleMicrophone() {
   if (isMicEnabled) {
     // Disable microphone
     if (localStream) {
-      localStream.getTracks().forEach(track => track.stop());
+      localStream.getTracks().forEach(track => {
+        console.log(`Stopping track: ${track.kind}`);
+        track.stop();
+      });
     }
     isMicEnabled = false;
     document.getElementById('mic-toggle').textContent = 'Enable Microphone';
     document.getElementById('mic-toggle').classList.add('disabled');
     
+    // Update mobile UI if it exists
+    const mobileMicBtn = document.getElementById('mobile-mic-btn');
+    if (mobileMicBtn) {
+      mobileMicBtn.classList.add('disabled');
+    }
+    
     // Clean up WebRTC connections
     for (const id in peerConnections) {
       cleanupPeerConnection(id);
     }
+    
+    console.log("Microphone disabled");
   } else {
     // Re-enable microphone
-    requestMicrophoneAccess();
+    requestMicrophoneAccess().then(() => {
+      // Update mobile UI if it exists
+      const mobileMicBtn = document.getElementById('mobile-mic-btn');
+      if (mobileMicBtn) {
+        mobileMicBtn.classList.remove('disabled');
+      }
+    }).catch(error => {
+      console.error('Failed to enable microphone:', error);
+    });
   }
 }
 
 // Set up audio analysis for speaking detection
 function setupAudioAnalysis() {
-  const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-  const analyser = audioContext.createAnalyser();
-  const microphone = audioContext.createMediaStreamSource(localStream);
-  
-  microphone.connect(analyser);
-  analyser.fftSize = 256;
-  
-  const bufferLength = analyser.frequencyBinCount;
-  const dataArray = new Uint8Array(bufferLength);
-  
-  // Check speaking status periodically
-  setInterval(() => {
-    analyser.getByteFrequencyData(dataArray);
-    
-    // Calculate average volume
-    let sum = 0;
-    for (let i = 0; i < bufferLength; i++) {
-      sum += dataArray[i];
+  try {
+    // Create audio context if it doesn't exist
+    if (!audioContext) {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
     }
-    const average = sum / bufferLength;
     
-    // Determine if speaking (adjust threshold as needed)
-    const newIsSpeaking = average > 30;
+    // Resume audio context if suspended
+    if (audioContext.state === 'suspended') {
+      audioContext.resume().catch(err => console.error('Failed to resume audio context:', err));
+    }
     
-    // Update speaking status if changed
-    if (newIsSpeaking !== isSpeaking) {
-      isSpeaking = newIsSpeaking;
+    const analyser = audioContext.createAnalyser();
+    const microphone = audioContext.createMediaStreamSource(localStream);
+    
+    microphone.connect(analyser);
+    analyser.fftSize = 256;
+    
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+    
+    // Check speaking status periodically
+    setInterval(() => {
+      analyser.getByteFrequencyData(dataArray);
       
-      // Update UI
-      document.getElementById('mic-indicator').classList.toggle('active', isSpeaking);
-      
-      // Update player state
-      if (players[playerId]) {
-        players[playerId].isSpeaking = isSpeaking;
-        
-        // Emit speaking status to server
-        socket.emit('speaking', {
-          id: playerId,
-          isSpeaking
-        });
+      // Calculate average volume
+      let sum = 0;
+      for (let i = 0; i < bufferLength; i++) {
+        sum += dataArray[i];
       }
-    }
-  }, 100);
+      const average = sum / bufferLength;
+      
+      // Determine if speaking (adjust threshold as needed)
+      const newIsSpeaking = average > 30;
+      
+      // Update speaking status if changed
+      if (newIsSpeaking !== isSpeaking) {
+        isSpeaking = newIsSpeaking;
+        
+        // Update UI
+        document.getElementById('mic-indicator').classList.toggle('active', isSpeaking);
+        
+        // Update mobile UI if it exists
+        const mobileMicIndicator = document.getElementById('mobile-mic-indicator');
+        if (mobileMicIndicator) {
+          mobileMicIndicator.classList.toggle('active', isSpeaking);
+        }
+        
+        // Update player state
+        if (players[playerId]) {
+          players[playerId].isSpeaking = isSpeaking;
+          
+          // Emit speaking status to server
+          socket.emit('speaking', {
+            id: playerId,
+            isSpeaking
+          });
+        }
+      }
+    }, 100);
+  } catch (error) {
+    console.error('Error setting up audio analysis:', error);
+  }
 }
 
 // Set up WebRTC peer connection
@@ -1778,22 +1847,49 @@ function setupPeerConnection(peerId) {
   // Skip if it's a bot
   if (players[peerId] && players[peerId].isBot) return;
   
-  // Create new RTCPeerConnection
+  console.log(`Setting up WebRTC connection with peer: ${peerId}`);
+  
+  // Create new RTCPeerConnection with more STUN/TURN servers for better connectivity
   const peerConnection = new RTCPeerConnection({
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' }
-    ]
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun3.l.google.com:19302' },
+      { urls: 'stun:stun4.l.google.com:19302' }
+    ],
+    iceCandidatePoolSize: 10,
+    bundlePolicy: 'max-bundle',
+    rtcpMuxPolicy: 'require'
   });
   
+  // Log connection state changes for debugging
+  peerConnection.oniceconnectionstatechange = () => {
+    console.log(`ICE connection state with ${peerId}: ${peerConnection.iceConnectionState}`);
+  };
+  
+  peerConnection.onconnectionstatechange = () => {
+    console.log(`Connection state with ${peerId}: ${peerConnection.connectionState}`);
+  };
+  
+  peerConnection.onsignalingstatechange = () => {
+    console.log(`Signaling state with ${peerId}: ${peerConnection.signalingState}`);
+  };
+  
   // Add local stream
-  localStream.getTracks().forEach(track => {
-    peerConnection.addTrack(track, localStream);
-  });
+  try {
+    localStream.getTracks().forEach(track => {
+      console.log(`Adding track to peer connection: ${track.kind}`);
+      peerConnection.addTrack(track, localStream);
+    });
+  } catch (error) {
+    console.error('Error adding tracks to peer connection:', error);
+  }
   
   // Handle ICE candidates
   peerConnection.onicecandidate = (event) => {
     if (event.candidate) {
+      console.log(`Sending ICE candidate to ${peerId}`);
       socket.emit('webrtc-ice-candidate', {
         candidate: event.candidate,
         to: peerId
@@ -1803,10 +1899,37 @@ function setupPeerConnection(peerId) {
   
   // Handle incoming tracks
   peerConnection.ontrack = (event) => {
+    console.log(`Received track from ${peerId}: ${event.track.kind}`);
+    
     // Create audio element for remote stream
     const audio = document.createElement('audio');
     audio.srcObject = event.streams[0];
     audio.autoplay = true;
+    
+    // iOS Safari requires user interaction to play audio
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    if (isIOS) {
+      // Add to DOM to make it work on iOS
+      audio.style.display = 'none';
+      document.body.appendChild(audio);
+      
+      // Try to play with error handling
+      audio.play().catch(err => {
+        console.warn('Auto-play failed (expected on iOS):', err);
+        
+        // iOS requires user interaction, we'll try to play when user interacts
+        const resumeAudio = () => {
+          audio.play().then(() => {
+            console.log('Audio playback started after user interaction');
+            document.removeEventListener('touchstart', resumeAudio);
+            document.removeEventListener('click', resumeAudio);
+          }).catch(e => console.error('Still failed to play audio:', e));
+        };
+        
+        document.addEventListener('touchstart', resumeAudio, { once: true });
+        document.addEventListener('click', resumeAudio, { once: true });
+      });
+    }
     
     // Store audio element
     audioElements[peerId] = audio;
@@ -1819,9 +1942,13 @@ function setupPeerConnection(peerId) {
   peerConnections[peerId] = peerConnection;
   
   // Create and send offer
-  peerConnection.createOffer()
+  peerConnection.createOffer({
+    offerToReceiveAudio: true,
+    voiceActivityDetection: true
+  })
     .then(offer => peerConnection.setLocalDescription(offer))
     .then(() => {
+      console.log(`Sending WebRTC offer to ${peerId}`);
       socket.emit('webrtc-offer', {
         offer: peerConnection.localDescription,
         to: peerId
@@ -1832,10 +1959,15 @@ function setupPeerConnection(peerId) {
 
 // Handle WebRTC offer
 function handleWebRTCOffer(data) {
-  if (!isMicEnabled) return;
+  if (!isMicEnabled) {
+    console.log(`Received offer from ${data.from} but mic is disabled, ignoring`);
+    return;
+  }
   
   // Skip if it's from a bot
   if (players[data.from] && players[data.from].isBot) return;
+  
+  console.log(`Received WebRTC offer from ${data.from}`);
   
   // Create new peer connection if it doesn't exist
   if (!peerConnections[data.from]) {
@@ -1846,9 +1978,19 @@ function handleWebRTCOffer(data) {
   
   // Set remote description
   peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer))
-    .then(() => peerConnection.createAnswer())
-    .then(answer => peerConnection.setLocalDescription(answer))
     .then(() => {
+      console.log(`Creating answer for ${data.from}`);
+      return peerConnection.createAnswer({
+        offerToReceiveAudio: true,
+        voiceActivityDetection: true
+      });
+    })
+    .then(answer => {
+      console.log(`Setting local description (answer) for ${data.from}`);
+      return peerConnection.setLocalDescription(answer);
+    })
+    .then(() => {
+      console.log(`Sending WebRTC answer to ${data.from}`);
       socket.emit('webrtc-answer', {
         answer: peerConnection.localDescription,
         to: data.from
@@ -1875,27 +2017,70 @@ function handleWebRTCIceCandidate(data) {
   // Skip if it's from a bot
   if (players[data.from] && players[data.from].isBot) return;
   
+  console.log(`Received ICE candidate from ${data.from}`);
+  
   const peerConnection = peerConnections[data.from];
   
   if (peerConnection) {
-    peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate))
-      .catch(error => console.error('Error adding ICE candidate:', error));
+    try {
+      peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate))
+        .then(() => {
+          console.log(`Added ICE candidate for ${data.from}`);
+        })
+        .catch(error => {
+          console.error(`Error adding ICE candidate for ${data.from}:`, error);
+        });
+    } catch (error) {
+      console.error(`Error processing ICE candidate for ${data.from}:`, error);
+    }
+  } else {
+    console.warn(`Received ICE candidate for unknown peer: ${data.from}`);
   }
 }
 
 // Clean up WebRTC peer connection
 function cleanupPeerConnection(peerId) {
+  console.log(`Cleaning up peer connection with ${peerId}`);
+  
   // Close peer connection
   if (peerConnections[peerId]) {
-    peerConnections[peerId].close();
+    try {
+      // Remove all tracks
+      const senders = peerConnections[peerId].getSenders();
+      if (senders && senders.length) {
+        senders.forEach(sender => {
+          try {
+            peerConnections[peerId].removeTrack(sender);
+          } catch (e) {
+            console.warn(`Error removing track from peer ${peerId}:`, e);
+          }
+        });
+      }
+      
+      // Close the connection
+      peerConnections[peerId].close();
+    } catch (e) {
+      console.error(`Error closing peer connection with ${peerId}:`, e);
+    }
+    
     delete peerConnections[peerId];
   }
   
   // Remove audio element
   if (audioElements[peerId]) {
-    audioElements[peerId].srcObject = null;
+    try {
+      if (audioElements[peerId].parentNode) {
+        audioElements[peerId].parentNode.removeChild(audioElements[peerId]);
+      }
+      audioElements[peerId].srcObject = null;
+    } catch (e) {
+      console.warn(`Error cleaning up audio element for ${peerId}:`, e);
+    }
+    
     delete audioElements[peerId];
   }
+  
+  console.log(`Peer connection with ${peerId} cleaned up`);
 }
 
 // Update audio volume based on distance
@@ -2608,6 +2793,36 @@ function setupMobileControls() {
     e.preventDefault();
     toggleMobileMenu();
   });
+  
+  // Add mobile mic button if not present
+  if (!document.getElementById('mobile-mic-btn')) {
+    const mobileActionButtons = document.getElementById('mobile-action-buttons');
+    const mobileMicBtn = document.createElement('button');
+    mobileMicBtn.id = 'mobile-mic-btn';
+    mobileMicBtn.className = 'mobile-btn disabled';
+    mobileMicBtn.innerHTML = '🎤';
+    mobileMicBtn.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      toggleMicrophone();
+      
+      // On iOS, we need to ensure audio context is resumed on user interaction
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+      if (isIOS && audioContext && audioContext.state === 'suspended') {
+        audioContext.resume().then(() => {
+          console.log('Audio context resumed from mobile mic button');
+        }).catch(err => {
+          console.error('Failed to resume audio context:', err);
+        });
+      }
+    });
+    mobileActionButtons.appendChild(mobileMicBtn);
+    
+    // Add mobile mic status indicator
+    const mobileMicIndicator = document.createElement('div');
+    mobileMicIndicator.id = 'mobile-mic-indicator';
+    mobileMicIndicator.className = 'mobile-mic-indicator';
+    document.body.appendChild(mobileMicIndicator);
+  }
 }
 
 // Handle joystick touch start

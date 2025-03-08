@@ -666,12 +666,11 @@ body {
 }
 
 #joystick-thumb {
-  width: 50px;
-  height: 50px;
-  background-color: rgba(0, 0, 0, 0.5);
+  width: 40%;
+  height: 40%;
+  background-color: rgba(255, 255, 255, 0.8);
   border-radius: 50%;
-  position: relative;
-  touch-action: none; /* Prevent default touch actions */
+  pointer-events: none;
 }
 
 #mobile-action-buttons {
@@ -681,7 +680,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 15px;
-  pointer-events: auto; /* Enable pointer events for the buttons */
+  pointer-events: auto; /* Enable pointer events for buttons */
 }
 
 .mobile-btn {
@@ -695,13 +694,48 @@ body {
   justify-content: center;
   align-items: center;
   cursor: pointer;
-  touch-action: manipulation; /* Optimize for touch */
-  -webkit-tap-highlight-color: transparent; /* Remove tap highlight on iOS */
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  transition: transform 0.2s, background-color 0.2s;
 }
 
 .mobile-btn:active {
-  background-color: rgba(200, 200, 200, 0.8);
   transform: scale(0.95);
+  background-color: rgba(220, 220, 220, 0.8);
+}
+
+/* Mobile microphone button and indicator */
+#mobile-mic-btn {
+  background-color: rgba(76, 175, 80, 0.9);
+  color: white;
+  font-size: 28px;
+  transition: background-color 0.3s;
+}
+
+#mobile-mic-btn.disabled {
+  background-color: rgba(244, 67, 54, 0.9);
+}
+
+.mobile-mic-indicator {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background-color: #ccc;
+  z-index: 1000;
+  display: none;
+}
+
+.mobile-mic-indicator.active {
+  background-color: #f44336;
+  animation: pulse 1s infinite;
+  display: block;
+}
+
+/* Show mobile mic indicator only when mic is enabled */
+.touch-device .mobile-mic-indicator {
+  display: block;
 }
 
 /* Media Queries for Mobile Devices */
