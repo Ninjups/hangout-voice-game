@@ -106,6 +106,12 @@ function init() {
   
   resizeCanvas();
   window.addEventListener('resize', resizeCanvas);
+  
+  // Re-check device type on window resize
+  window.addEventListener('resize', () => {
+    // Add a small delay to ensure the resize is complete
+    setTimeout(detectTouchDevice, 300);
+  });
 
   // Initialize background particles
   initParticles();
@@ -398,6 +404,17 @@ function connectToServer() {
     players = data.players;
     worldSize = data.worldSize;
 
+    console.log('Received initial game state:', {
+      playerId: playerId,
+      playerCount: Object.keys(players).length,
+      worldSize: worldSize
+    });
+    
+    // Debug log all players received
+    for (const id in players) {
+      console.log(`Initial player: ${id}`, players[id]);
+    }
+
     // Initialize velocity for all players if not present
     for (const id in players) {
       if (players[id].velocityX === undefined) {
@@ -423,21 +440,29 @@ function connectToServer() {
 
   // Handle new player joined
   socket.on('playerJoined', (data) => {
-    console.log(`New player joined: ${data.id}`);
+    console.log(`New player joined: ${data.id}`, data);
+    
+    // Skip if this is our own player (already handled in init)
+    if (data.id === playerId) {
+      console.log('Skipping self in playerJoined event');
+      return;
+    }
     
     // Add player to the game
     players[data.id] = {
       id: data.id,
       x: data.x,
       y: data.y,
-      velocityX: 0,
-      velocityY: 0,
+      velocityX: data.velocityX || 0,
+      velocityY: data.velocityY || 0,
       color: data.color,
       name: data.name || 'Player',
       isSpeaking: false,
       isBot: data.isBot || false,
       customImage: data.customImage || null
     };
+    
+    console.log(`Added player ${data.id} to game state`);
     
     // Set up WebRTC connection if microphone is enabled
     if (isMicEnabled && !data.isBot && data.id !== playerId) {
@@ -460,16 +485,21 @@ function connectToServer() {
   // Handle player left
   socket.on('playerLeft', (data) => {
     console.log(`Player left: ${data.id}`);
-    delete players[data.id];
-    updatePlayerCount();
     
-    // Clean up WebRTC connection
-    cleanupPeerConnection(data.id);
-    
-    // Clean up bot sound
-    if (botSounds[data.id]) {
-      botSounds[data.id].audio.pause();
-      delete botSounds[data.id];
+    if (players[data.id]) {
+      delete players[data.id];
+      updatePlayerCount();
+      
+      // Clean up WebRTC connection
+      cleanupPeerConnection(data.id);
+      
+      // Clean up bot sound
+      if (botSounds[data.id]) {
+        botSounds[data.id].audio.pause();
+        delete botSounds[data.id];
+      }
+    } else {
+      console.warn(`Player ${data.id} not found in game state when handling playerLeft`);
     }
   });
 
@@ -602,7 +632,6 @@ function connectToServer() {
 
 // Set up bot sounds
 function setupBotSounds() {
-  // Check for bots in the initial player list
   for (const id in players) {
     if (players[id].isBot && players[id].botSoundFile) {
       setupBotSound(id, players[id].botSoundFile);
@@ -613,6 +642,12 @@ function setupBotSounds() {
 // Set up bot sound
 function setupBotSound(botId, soundFile) {
   console.log(`Setting up bot sound for ${botId} with file ${soundFile}`);
+  
+  // Skip if no sound file is provided
+  if (!soundFile) {
+    console.log(`No sound file for bot ${botId}, skipping audio setup`);
+    return;
+  }
   
   // Create audio context for more reliable audio playback
   const audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -765,8 +800,12 @@ function ensureBotAudioPlaying(botId) {
 
 // Handle bot speaking
 function handleBotSpeaking(botId, isSpeaking, timestamp) {
+  // Skip if this bot doesn't have sound setup
   if (!botSounds[botId]) {
-    console.error(`Bot sound not found for ${botId}`);
+    // This is normal for bots without sound files
+    if (players[botId] && players[botId].botSoundFile) {
+      console.error(`Bot sound not found for ${botId} but it should have one`);
+    }
     return;
   }
   
@@ -860,30 +899,36 @@ function shouldPlayBotSound(botId) {
 
 // Update bot sound volume based on distance
 function updateBotSoundVolume(botId) {
-  if (!players[playerId] || !players[botId] || !botSounds[botId]) return;
+  // Skip if this bot doesn't have sound setup
+  if (!players[playerId] || !players[botId] || !botSounds[botId]) {
+    return;
+  }
   
   // Calculate distance between player and bot
   const dx = players[playerId].x - players[botId].x;
   const dy = players[playerId].y - players[botId].y;
   const distance = Math.sqrt(dx * dx + dy * dy);
   
-  // Calculate volume based on distance (quadratic falloff for more natural sound attenuation)
-  // This creates a steeper volume drop-off as distance increases
-  let volume = 1 - Math.pow(distance / VOICE_MAX_DISTANCE, 2);
-  volume = Math.max(0, Math.min(1, volume));
+  // Maximum distance for audio
+  const VOICE_MAX_DISTANCE = 500;
   
-  // Check if the bot should be audible
-  const shouldBeAudible = volume > 0 && !mutedPlayers.includes(botId);
+  // Calculate if the bot should be audible
+  const shouldBeAudible = distance <= VOICE_MAX_DISTANCE;
   
-  // Apply volume using the gain node for smoother transitions
-  if (!mutedPlayers.includes(botId)) {
-    // Use exponential ramp for more natural volume changes
-    const now = botSounds[botId].audioContext.currentTime;
-    botSounds[botId].gainNode.gain.setValueAtTime(botSounds[botId].gainNode.gain.value, now);
-    botSounds[botId].gainNode.gain.exponentialRampToValueAtTime(Math.max(0.0001, volume), now + 0.2);
-  } else {
-    // If muted, set volume to 0 but don't pause
-    botSounds[botId].gainNode.gain.value = 0;
+  // Calculate volume based on distance
+  let volume = 0;
+  if (shouldBeAudible) {
+    // Linear falloff based on distance
+    volume = 1 - (distance / VOICE_MAX_DISTANCE);
+    
+    // Apply a curve to make it sound more natural
+    volume = Math.pow(volume, 1.5);
+    
+    // Ensure minimum volume when in range
+    volume = Math.max(0.1, volume);
+    
+    // Apply volume
+    botSounds[botId].gainNode.gain.value = volume;
   }
   
   // Handle playback state based on distance
@@ -1000,6 +1045,14 @@ function render() {
   
   // Draw particles
   drawParticles();
+
+  // Debug: log player count during rendering
+  if (Math.random() < 0.01) { // Only log occasionally to avoid spam
+    console.log(`Rendering ${Object.keys(players).length} players`);
+    for (const id in players) {
+      console.log(`Player ${id}: ${players[id].name} at (${Math.round(players[id].x)}, ${Math.round(players[id].y)})`);
+    }
+  }
 
   // Draw players in two passes: first regular players, then bots
   // This ensures bots are always on top and visible
@@ -2972,13 +3025,38 @@ function handlePlayerMovement() {
 
 // Detect if the device supports touch
 function detectTouchDevice() {
-  isMobileDevice = ('ontouchstart' in window) || 
-                   (navigator.maxTouchPoints > 0) || 
-                   (navigator.msMaxTouchPoints > 0);
+  // Check if it's a mobile device based on user agent
+  const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+  
+  // Regular expression to detect mobile devices
+  const mobileRegex = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini|mobile|tablet/i;
+  
+  // Check if it's a mobile device by user agent
+  const isMobileByUA = mobileRegex.test(userAgent.toLowerCase());
+  
+  // Check if it has touch capabilities
+  const hasTouchCapability = ('ontouchstart' in window) || 
+                            (navigator.maxTouchPoints > 0) || 
+                            (navigator.msMaxTouchPoints > 0);
+  
+  // Check screen size - typical mobile devices have smaller screens
+  const hasSmallScreen = window.innerWidth <= 1024;
+  
+  // Consider it a mobile device if:
+  // 1. It has a mobile user agent AND touch capabilities, OR
+  // 2. It has touch capabilities AND a small screen
+  isMobileDevice = (isMobileByUA && hasTouchCapability) || (hasTouchCapability && hasSmallScreen);
+  
+  console.log(`Device detection: Mobile UA: ${isMobileByUA}, Touch: ${hasTouchCapability}, Small Screen: ${hasSmallScreen}, Final: ${isMobileDevice}`);
   
   if (isMobileDevice) {
     document.body.classList.add('touch-device');
     document.getElementById('mobile-controls').classList.remove('hidden');
+    console.log('Mobile controls enabled');
+  } else {
+    document.body.classList.remove('touch-device');
+    document.getElementById('mobile-controls').classList.add('hidden');
+    console.log('Mobile controls disabled (desktop mode)');
   }
 }
 

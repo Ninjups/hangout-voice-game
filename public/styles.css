@@ -639,7 +639,7 @@ body {
   width: 100%;
   height: 200px;
   z-index: 5;
-  display: flex;
+  display: none; /* Hide by default */
   justify-content: space-between;
   pointer-events: none; /* Allow clicks to pass through the container */
 }
@@ -813,6 +813,12 @@ body {
 /* Touch Detection - Will be set by JavaScript */
 .touch-device #mobile-controls {
   display: flex;
+}
+
+/* Hide mobile controls explicitly on non-touch devices */
+body:not(.touch-device) #mobile-controls,
+body:not(.touch-device) .mobile-mic-indicator {
+  display: none !important;
 }
 
 /* Mobile UI Adjustments */

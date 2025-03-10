@@ -45,11 +45,73 @@ players[botId] = {
   audioStartTime: Date.now() // Timestamp when audio started playing
 };
 
+// Create two fighting bots that stay close to each other
+// Define the ideal distance between fighting bots
+const FIGHTING_BOTS_DISTANCE = 40;
+
+// First fighting bot (with sound)
+const fightingBot1Id = `bot-${uuidv4()}`;
+// Position away from edges to ensure room for movement
+const fightingBot1X = Math.random() * (worldSize.width - 300) + 150;
+const fightingBot1Y = Math.random() * (worldSize.height - 300) + 150;
+
+players[fightingBot1Id] = {
+  id: fightingBot1Id,
+  socketId: null,
+  x: fightingBot1X,
+  y: fightingBot1Y,
+  velocityX: 0,
+  velocityY: 0,
+  color: '#00AAFF', // Blue color
+  name: 'Fighting Bot 1',
+  isSpeaking: true,
+  isBot: true,
+  customImage: '/assets/bots/fightingbots.jpg',
+  botSoundFile: '/assets/bots/TwoFightingFunny.mp3',
+  lastSpeakingChange: Date.now(),
+  speakingDuration: 0,
+  forceSpeakingChange: false,
+  audioStartTime: Date.now(),
+  pairedBotId: null // Will be set after creating the second bot
+};
+
+// Second fighting bot (without sound, just visual speaking)
+const fightingBot2Id = `bot-${uuidv4()}`;
+players[fightingBot2Id] = {
+  id: fightingBot2Id,
+  socketId: null,
+  x: fightingBot1X + FIGHTING_BOTS_DISTANCE, // Position exactly at the ideal distance
+  y: fightingBot1Y,
+  velocityX: 0,
+  velocityY: 0,
+  color: '#FF00AA', // Pink color
+  name: 'Fighting Bot 2',
+  isSpeaking: true,
+  isBot: true,
+  customImage: '/assets/bots/fightingbots.jpg',
+  botSoundFile: null, // No sound file, will just appear to be speaking
+  lastSpeakingChange: Date.now(),
+  speakingDuration: 0,
+  forceSpeakingChange: false,
+  audioStartTime: Date.now(),
+  pairedBotId: fightingBot1Id // Reference to the first bot
+};
+
+// Set the paired bot reference for the first bot
+players[fightingBot1Id].pairedBotId = fightingBot2Id;
+
 // Move bot randomly
 function moveBotRandomly(botId) {
   if (!players[botId]) return;
   
-  // Random movement with acceleration
+  // Check if this is one of the paired fighting bots
+  if (players[botId].pairedBotId) {
+    // This is a paired bot, handle special movement
+    movePairedBot(botId);
+    return;
+  }
+  
+  // Regular bot movement logic
   const moveX = Math.random() > 0.5 ? 1 : -1;
   const moveY = Math.random() > 0.5 ? 1 : -1;
   
@@ -130,6 +192,148 @@ function moveBotRandomly(botId) {
   });
 }
 
+// Move paired bots (fighting bots that stay close to each other)
+function movePairedBot(botId) {
+  if (!players[botId] || !players[botId].pairedBotId) return;
+  
+  const pairedBotId = players[botId].pairedBotId;
+  if (!players[pairedBotId]) return;
+  
+  // Determine which bot is the leader (the one with sound)
+  const isLeader = players[botId].botSoundFile !== null;
+  const leaderId = isLeader ? botId : pairedBotId;
+  const followerId = isLeader ? pairedBotId : botId;
+  
+  // Define maximum allowed distance between bots
+  const MAX_BOT_SEPARATION = 60; // Maximum distance in pixels
+  const IDEAL_BOT_DISTANCE = 40; // Ideal distance between bots
+  
+  // Calculate current distance between bots
+  const currentDistance = Math.sqrt(
+    Math.pow(players[leaderId].x - players[followerId].x, 2) + 
+    Math.pow(players[leaderId].y - players[followerId].y, 2)
+  );
+  
+  // Only the leader bot determines movement
+  if (isLeader) {
+    // Check if bots are too far apart
+    if (currentDistance > MAX_BOT_SEPARATION) {
+      console.log(`Fighting bots too far apart (${currentDistance.toFixed(2)}px). Correcting position...`);
+      
+      // Calculate direction vector from follower to leader
+      const dirX = players[leaderId].x - players[followerId].x;
+      const dirY = players[leaderId].y - players[followerId].y;
+      
+      // Normalize direction vector
+      const length = Math.sqrt(dirX * dirX + dirY * dirY);
+      const normDirX = dirX / length;
+      const normDirY = dirY / length;
+      
+      // Move follower towards leader to maintain maximum distance
+      players[followerId].x = players[leaderId].x - (normDirX * IDEAL_BOT_DISTANCE);
+      players[followerId].y = players[leaderId].y - (normDirY * IDEAL_BOT_DISTANCE);
+      
+      // Adjust velocities to move together
+      players[followerId].velocityX = players[leaderId].velocityX;
+      players[followerId].velocityY = players[leaderId].velocityY;
+    } else {
+      // Normal movement when distance is acceptable
+      // Random movement with acceleration, but slower than regular bots
+      const moveX = Math.random() > 0.5 ? 1 : -1;
+      const moveY = Math.random() > 0.5 ? 1 : -1;
+      
+      // Apply acceleration with some randomness
+      players[leaderId].velocityX += moveX * 0.1 * Math.random();
+      players[leaderId].velocityY += moveY * 0.1 * Math.random();
+      
+      // Apply velocity cap (slower than regular bots)
+      const MAX_PAIRED_BOT_VELOCITY = 2;
+      players[leaderId].velocityX = Math.max(-MAX_PAIRED_BOT_VELOCITY, Math.min(MAX_PAIRED_BOT_VELOCITY, players[leaderId].velocityX));
+      players[leaderId].velocityY = Math.max(-MAX_PAIRED_BOT_VELOCITY, Math.min(MAX_PAIRED_BOT_VELOCITY, players[leaderId].velocityY));
+      
+      // Apply velocity to position
+      players[leaderId].x += players[leaderId].velocityX;
+      players[leaderId].y += players[leaderId].velocityY;
+      
+      // Apply friction
+      const PAIRED_BOT_FRICTION = 0.98;
+      players[leaderId].velocityX *= PAIRED_BOT_FRICTION;
+      players[leaderId].velocityY *= PAIRED_BOT_FRICTION;
+      
+      // Keep bot within world bounds
+      const prevX = players[leaderId].x;
+      const prevY = players[leaderId].y;
+      
+      players[leaderId].x = Math.max(50, Math.min(worldSize.width - 50, players[leaderId].x));
+      players[leaderId].y = Math.max(50, Math.min(worldSize.height - 50, players[leaderId].y));
+      
+      // If bot hit a boundary, reverse velocity in that direction
+      if (players[leaderId].x !== prevX) players[leaderId].velocityX *= -0.5;
+      if (players[leaderId].y !== prevY) players[leaderId].velocityY *= -0.5;
+      
+      // Position the follower bot next to the leader
+      // Calculate a position that's slightly offset but looks like they're facing each other
+      // Use a smaller random variation to keep them closer
+      const offsetX = IDEAL_BOT_DISTANCE * (Math.random() * 0.2 + 0.9); // Random offset between 36-44 pixels
+      const offsetY = 8 * (Math.random() * 0.6 - 0.3); // Small random Y variation
+      
+      players[followerId].x = players[leaderId].x + offsetX;
+      players[followerId].y = players[leaderId].y + offsetY;
+      
+      // Match velocities for smooth movement
+      players[followerId].velocityX = players[leaderId].velocityX;
+      players[followerId].velocityY = players[leaderId].velocityY;
+    }
+    
+    // Ensure follower stays within world bounds too
+    players[followerId].x = Math.max(50, Math.min(worldSize.width - 50, players[followerId].x));
+    players[followerId].y = Math.max(50, Math.min(worldSize.height - 50, players[followerId].y));
+  }
+  
+  // Get current time
+  const currentTime = Date.now();
+  
+  // Update speaking duration for both bots
+  players[botId].speakingDuration = currentTime - players[botId].lastSpeakingChange;
+  
+  // Ensure both bots are always speaking
+  if (!players[botId].isSpeaking) {
+    players[botId].isSpeaking = true;
+    players[botId].lastSpeakingChange = currentTime;
+    players[botId].audioStartTime = currentTime;
+    
+    // Broadcast bot speaking status with timestamp
+    io.emit('playerSpeaking', {
+      id: botId,
+      isSpeaking: true,
+      timestamp: players[botId].audioStartTime
+    });
+  }
+  
+  // Occasionally restart the audio to prevent any sync issues (every 37.5 minutes)
+  if (players[botId].isSpeaking && players[botId].speakingDuration > 2250000) {
+    // Just update the timestamp and notify clients to restart audio
+    players[botId].lastSpeakingChange = currentTime;
+    players[botId].audioStartTime = currentTime;
+    
+    // Broadcast bot speaking status with new timestamp
+    io.emit('playerSpeaking', {
+      id: botId,
+      isSpeaking: true,
+      timestamp: players[botId].audioStartTime
+    });
+  }
+  
+  // Broadcast bot movement to all players
+  io.emit('playerMoved', {
+    id: botId,
+    x: players[botId].x,
+    y: players[botId].y,
+    velocityX: players[botId].velocityX,
+    velocityY: players[botId].velocityY
+  });
+}
+
 // Socket.IO connection handler
 io.on('connection', (socket) => {
   console.log('New player connected:', socket.id);
@@ -153,6 +357,8 @@ io.on('connection', (socket) => {
     customImage: null
   };
   
+  console.log(`Created new player: ${playerId} with socket ID: ${socket.id}`);
+  
   // Send the player their ID and initial state
   socket.emit('init', {
     id: playerId,
@@ -165,6 +371,9 @@ io.on('connection', (socket) => {
   
   // Broadcast new player to all other players
   socket.broadcast.emit('playerJoined', players[playerId]);
+  
+  // Also send the new player to themselves to ensure consistency
+  socket.emit('playerJoined', players[playerId]);
   
   // Handle player movement
   socket.on('move', (data) => {
@@ -326,11 +535,15 @@ io.on('connection', (socket) => {
     const playerId = findPlayerIdBySocketId(socket.id);
     
     if (playerId) {
+      console.log(`Player ${playerId} disconnected, removing from game state`);
+      
       // Remove the player from the game state
       delete players[playerId];
       
       // Broadcast player disconnection to all other players
-      socket.broadcast.emit('playerLeft', { id: playerId });
+      io.emit('playerLeft', { id: playerId });
+    } else {
+      console.log(`Could not find player with socket ID: ${socket.id}`);
     }
   });
 });
@@ -352,8 +565,13 @@ server.listen(PORT, () => {
   
   // Start bot movement
   botMovementInterval = setInterval(() => {
+    // Move the Dracula bot
     moveBotRandomly(botId);
-  }, 1000); // Move bot every second
+    
+    // Move the fighting bots
+    movePairedBot(fightingBot1Id);
+    // No need to call movePairedBot for the second bot as it's handled by the first one
+  }, 100);
 });
 
 // Clean up on server shutdown
